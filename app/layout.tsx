@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Link from "next/link";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +28,49 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        {/* Navigation Header */}
+        <header className="bg-white shadow-sm border-b">
+          <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center h-16">
+              {/* Logo/Brand */}
+              <div className="flex-shrink-0">
+                <Link href="/" className="text-xl font-bold text-gray-900">
+                  Aussie Steel Dashboard
+                </Link>
+              </div>
+
+              {/* Navigation Links */}
+              <div className="flex space-x-8">
+                <Link
+                  href="/"
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  Home
+                </Link>
+                <Link
+                  href="/register-company"
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  Company Settings
+                </Link>
+              </div>
+            </div>
+          </nav>
+        </header>
+
+        {/* Main Content */}
+        <main className="min-h-screen bg-gray-50">
+          {children}
+        </main>
+
+        {/* Optional Footer */}
+        <footer className="bg-white border-t">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="text-center text-sm text-gray-500">
+              © 2024 Your App. All rights reserved.
+            </div>
+          </div>
+        </footer>
       </body>
     </html>
   );

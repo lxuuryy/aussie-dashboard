@@ -143,9 +143,24 @@ const InvoiceManagement = () => {
       setInvoices(ordersData);
       
       // Calculate total revenue
-      const revenue = ordersData.reduce((sum, invoice) => {
-        return sum + (invoice.totalAmount || 0);
-      }, 0);
+      // Calculate total revenue - with proper number parsing
+const revenue = ordersData.reduce((sum, invoice) => {
+  let amount = 0;
+  
+  // Try different possible amount fields and parse them properly
+  if (invoice.totalAmount) {
+    amount = parseFloat(String(invoice.totalAmount).replace(/[^0-9.-]/g, ''));
+  } else if (invoice.totals?.total) {
+    amount = parseFloat(String(invoice.totals.total).replace(/[^0-9.-]/g, ''));
+  } else if (invoice.total) {
+    amount = parseFloat(String(invoice.total).replace(/[^0-9.-]/g, ''));
+  }
+  
+  // Make sure we have a valid number
+  if (isNaN(amount)) amount = 0;
+  
+  return sum + amount;
+}, 0);
       setTotalRevenue(revenue);
 
     } catch (error) {

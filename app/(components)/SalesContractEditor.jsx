@@ -25,7 +25,13 @@ import {
   Users,
   X,
   Plus,
-  ChevronDown
+  ChevronDown,
+  Search,
+  Shield,
+  Tag,
+  Ruler,
+  Weight,
+  Calculator
 } from 'lucide-react';
 import { db } from '@/firebase';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
@@ -40,11 +46,17 @@ const OrderContractEditor = () => {
 
   const [order, setOrder] = useState(null);
   const [companyData, setCompanyData] = useState(null);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [showContractGenerator, setShowContractGenerator] = useState(false);
+
+  // Product selection state
+  const [showProductSelector, setShowProductSelector] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [filteredProducts, setFilteredProducts] = useState([]);
 
   // Email management state
   const [selectedAuthorizedEmails, setSelectedAuthorizedEmails] = useState([]);
@@ -74,25 +86,83 @@ const OrderContractEditor = () => {
       country: 'Australia',
       fullAddress: ''
     },
+    items: [{
+      itemCode: '',
+      productName: '',
+      description: '',
+      category: '',
+      material: '',
+      finish: '',
+      dimensions: {
+        length: '',
+        width: '',
+        height: '',
+        diameter: '',
+        thickness: '',
+        unit: 'mm'
+      },
+      specifications: [],
+      tags: [],
+      quantity: 0,
+      unitPrice: 0,
+      pricePerUnit: 'each',
+      currency: 'AUD',
+      totalWeight: 0,
+      isACRSCertified: false
+    }],
     estimatedDelivery: '',
     reference: '',
     notes: '',
     authorizedEmails: [],
     contractTerms: {
-      paymentTerms: '30 days',
-      deliveryTerms: 'Ex-Works',
-      warrantyPeriod: '12 months',
-      specialConditions: ''
+      paymentTerms: '30 Days from delivery to yard',
+      deliveryTerms: 'Delivery Duty paid - unloading by purchaser',
+      quantityTolerance: '+/- 10%',
+      invoicingBasis: 'Theoretical Weight',
+      packing: "Mill's Standard for Export",
+      documentation: 'Commercial Invoice\nCertificate of Origin\nMill Test Certificates\nACRS Certification'
     }
   });
 
-  // Load order data and company data
+  // Load order data, company data, and products
   useEffect(() => {
-    console.log(orderId, 'Order ID from params');
     if (orderId) {
       fetchOrder();
+      fetchProducts();
     }
   }, [orderId]);
+
+  // Filter products based on search
+  useEffect(() => {
+    if (!productSearch) {
+      setFilteredProducts(products);
+    } else {
+      const filtered = products.filter(product =>
+        product.itemCode?.toLowerCase().includes(productSearch.toLowerCase()) ||
+        product.productName?.toLowerCase().includes(productSearch.toLowerCase()) ||
+        product.description?.toLowerCase().includes(productSearch.toLowerCase()) ||
+        product.category?.toLowerCase().includes(productSearch.toLowerCase()) ||
+        product.material?.toLowerCase().includes(productSearch.toLowerCase())
+      );
+      setFilteredProducts(filtered);
+    }
+  }, [products, productSearch]);
+
+  const fetchProducts = async () => {
+    try {
+      const productsQuery = query(collection(db, 'products'));
+      const productsSnapshot = await getDocs(productsQuery);
+      
+      const productsData = productsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      setProducts(productsData.filter(p => p.isActive)); // Only active products
+    } catch (error) {
+      console.error('Error fetching products:', error);
+    }
+  };
 
   const fetchOrder = async () => {
     try {
@@ -106,7 +176,6 @@ const OrderContractEditor = () => {
         return;
       }
 
-      console.log('Fetched order:', orderDoc.data());
       const orderData = {
         id: orderDoc.id,
         ...orderDoc.data(),
@@ -149,7 +218,6 @@ const OrderContractEditor = () => {
           ...companyDoc.data()
         };
         setCompanyData(company);
-        console.log('Fetched company data:', company);
       }
     } catch (error) {
       console.error('Error fetching company data:', error);
@@ -189,35 +257,78 @@ const OrderContractEditor = () => {
         fullAddress: orderData.deliveryAddress?.fullAddress || ''
       },
       
-      // Product Information
-      productDescription: `${orderData.items?.[0]?.barType || 'N16'} x ${orderData.items?.[0]?.length || 6}m rebar - AS 4671 : 2019 Grade 500N Deformed Reinforcing Bar ACRS Certified`,
-      barType: orderData.items?.[0]?.barType || 'N16',
-      length: orderData.items?.[0]?.length || 6,
-      quantity: orderData.items?.[0]?.totalWeight || orderData.items?.[0]?.quantity || 0,
-      pricePerTonne: orderData.items?.[0]?.pricePerTonne || 0,
-      
-      // Financial Information
-      subtotal: orderData.subtotal || 0,
-      gst: orderData.gst || 0,
-      totalAmount: orderData.totalAmount || 0,
+      // Items - Convert from order data structure
+      items: orderData.items ? orderData.items.map(item => ({
+        itemCode: item.itemCode || '',
+        productName: item.productName || item.barType || '',
+        description: item.description || '',
+        category: item.category || '',
+        material: item.material || '',
+        finish: item.finish || '',
+        dimensions: {
+          length: item.dimensions?.length || item.length || '',
+          width: item.dimensions?.width || '',
+          height: item.dimensions?.height || '',
+          diameter: item.dimensions?.diameter || '',
+          thickness: item.dimensions?.thickness || '',
+          unit: item.dimensions?.unit || 'mm'
+        },
+        specifications: item.specifications || [],
+        tags: item.tags || [],
+        quantity: item.quantity || item.totalWeight || 0,
+        unitPrice: item.unitPrice || item.pricePerTonne || 0,
+        pricePerUnit: item.pricePerUnit || 'each',
+        currency: item.currency || 'AUD',
+        totalWeight: item.totalWeight || item.quantity || 0,
+        isACRSCertified: item.isACRSCertified || false,
+        weight: item.weight || null
+      })) : [{
+        itemCode: '',
+        productName: '',
+        description: '',
+        category: '',
+        material: '',
+        finish: '',
+        dimensions: {
+          length: '',
+          width: '',
+          height: '',
+          diameter: '',
+          thickness: '',
+          unit: 'mm'
+        },
+        specifications: [],
+        tags: [],
+        quantity: 0,
+        unitPrice: 0,
+        pricePerUnit: 'each',
+        currency: 'AUD',
+        totalWeight: 0,
+        isACRSCertified: false
+      }],
       
       // Terms and Conditions
-      paymentTerms: orderData.paymentTerms || '30 Days from delivery to yard',
-      deliveryTerms: orderData.deliveryTerms || 'Delivery Duty paid - unloading by purchaser',
-      quantityTolerance: orderData.quantityTolerance || '+/- 10%',
-      invoicingBasis: orderData.invoicingBasis || 'Theoretical Weight',
-      packing: orderData.packing || "Mill's Standard for Export",
+      contractTerms: {
+        paymentTerms: orderData.paymentTerms || '30 Days from delivery to yard',
+        deliveryTerms: orderData.deliveryTerms || 'Delivery Duty paid - unloading by purchaser',
+        quantityTolerance: orderData.quantityTolerance || '+/- 10%',
+        invoicingBasis: orderData.invoicingBasis || 'Theoretical Weight',
+        packing: orderData.packing || "Mill's Standard for Export",
+        documentation: orderData.documentation || 'Commercial Invoice\nCertificate of Origin\nMill Test Certificates\nACRS Certification'
+      },
       
       // Delivery Information
       estimatedDelivery: formatDateForInput(orderData.estimatedDelivery),
       shipmentDetails: orderData.shipmentDetails || '',
       
-      // Documentation
-      documentation: orderData.documentation || 'Commercial Invoice\nCertificate of Origin\nMill Test Certificates\nACRS Certification',
-      
       // Additional Notes
       notes: orderData.notes || '',
       reference: orderData.reference || '',
+      
+      // Financial
+      subtotal: orderData.subtotal || 0,
+      gst: orderData.gst || 0,
+      totalAmount: orderData.totalAmount || 0,
       
       // Authorized Emails
       authorizedEmails: orderData.authorizedEmails || []
@@ -245,26 +356,149 @@ const OrderContractEditor = () => {
     return '';
   };
 
-  const handleInputChange = (field, value) => {
-    if (field.includes('.')) {
-      const fields = field.split('.');
+  const handleInputChange = (field, value, itemIndex = null) => {
+    if (itemIndex !== null) {
+      // Handle item-specific changes
       setFormData(prev => {
-        const newData = { ...prev };
-        let current = newData;
-        for (let i = 0; i < fields.length - 1; i++) {
-          if (!current[fields[i]]) current[fields[i]] = {};
-          current = current[fields[i]];
+        const newItems = [...prev.items];
+        if (field.includes('.')) {
+          const fields = field.split('.');
+          let current = newItems[itemIndex];
+          for (let i = 0; i < fields.length - 1; i++) {
+            if (!current[fields[i]]) current[fields[i]] = {};
+            current = current[fields[i]];
+          }
+          current[fields[fields.length - 1]] = value;
+        } else {
+          newItems[itemIndex][field] = value;
         }
-        current[fields[fields.length - 1]] = value;
-        return newData;
+        return { ...prev, items: newItems };
       });
     } else {
-      setFormData(prev => ({
-        ...prev,
-        [field]: value
-      }));
+      // Handle general form changes
+      if (field.includes('.')) {
+        const fields = field.split('.');
+        setFormData(prev => {
+          const newData = { ...prev };
+          let current = newData;
+          for (let i = 0; i < fields.length - 1; i++) {
+            if (!current[fields[i]]) current[fields[i]] = {};
+            current = current[fields[i]];
+          }
+          current[fields[fields.length - 1]] = value;
+          return newData;
+        });
+      } else {
+        setFormData(prev => ({
+          ...prev,
+          [field]: value
+        }));
+      }
     }
     setHasChanges(true);
+  };
+
+  const selectProduct = (product, itemIndex = 0) => {
+    const updatedItem = {
+      itemCode: product.itemCode,
+      productName: product.productName,
+      description: product.description,
+      category: product.category,
+      material: product.material,
+      finish: product.finish || '',
+      dimensions: {
+        length: product.dimensions?.length || '',
+        width: product.dimensions?.width || '',
+        height: product.dimensions?.height || '',
+        diameter: product.dimensions?.diameter || '',
+        thickness: product.dimensions?.thickness || '',
+        unit: product.dimensions?.unit || 'mm'
+      },
+      specifications: product.specifications || [],
+      tags: product.tags || [],
+      quantity: formData.items[itemIndex]?.quantity || 1,
+      unitPrice: product.pricing?.unitPrice || 0,
+      pricePerUnit: product.pricing?.pricePerUnit || 'each',
+      currency: product.pricing?.currency || 'AUD',
+      totalWeight: product.weight || 0,
+      isACRSCertified: product.isACRSCertified || false,
+      weight: product.weight || null
+    };
+
+    setFormData(prev => {
+      const newItems = [...prev.items];
+      newItems[itemIndex] = updatedItem;
+      return { ...prev, items: newItems };
+    });
+
+    setShowProductSelector(false);
+    setProductSearch('');
+    setHasChanges(true);
+    
+    // Calculate totals
+    setTimeout(calculateTotals, 100);
+  };
+
+  const addNewItem = () => {
+    setFormData(prev => ({
+      ...prev,
+      items: [...prev.items, {
+        itemCode: '',
+        productName: '',
+        description: '',
+        category: '',
+        material: '',
+        finish: '',
+        dimensions: {
+          length: '',
+          width: '',
+          height: '',
+          diameter: '',
+          thickness: '',
+          unit: 'mm'
+        },
+        specifications: [],
+        tags: [],
+        quantity: 0,
+        unitPrice: 0,
+        pricePerUnit: 'each',
+        currency: 'AUD',
+        totalWeight: 0,
+        isACRSCertified: false
+      }]
+    }));
+    setHasChanges(true);
+  };
+
+  const removeItem = (itemIndex) => {
+    if (formData.items.length > 1) {
+      setFormData(prev => ({
+        ...prev,
+        items: prev.items.filter((_, index) => index !== itemIndex)
+      }));
+      setHasChanges(true);
+      setTimeout(calculateTotals, 100);
+    }
+  };
+
+  const calculateTotals = () => {
+    let subtotal = 0;
+    
+    formData.items.forEach(item => {
+      const quantity = parseFloat(item.quantity) || 0;
+      const unitPrice = parseFloat(item.unitPrice) || 0;
+      subtotal += quantity * unitPrice;
+    });
+    
+    const gst = subtotal * 0.1;
+    const total = subtotal + gst;
+    
+    setFormData(prev => ({
+      ...prev,
+      subtotal: subtotal,
+      gst: gst,
+      totalAmount: total
+    }));
   };
 
   // Email management functions
@@ -304,21 +538,6 @@ const OrderContractEditor = () => {
     setHasChanges(true);
   };
 
-  const calculateTotals = () => {
-    const quantity = parseFloat(formData.quantity) || 0;
-    const pricePerTonne = parseFloat(formData.pricePerTonne) || 0;
-    const subtotal = quantity * pricePerTonne;
-    const gst = subtotal * 0.1;
-    const total = subtotal + gst;
-    
-    setFormData(prev => ({
-      ...prev,
-      subtotal: subtotal,
-      gst: gst,
-      totalAmount: total
-    }));
-  };
-
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -352,28 +571,43 @@ const OrderContractEditor = () => {
           fullAddress: `${formData.deliveryAddress.street}, ${formData.deliveryAddress.city} ${formData.deliveryAddress.state} ${formData.deliveryAddress.postcode}`
         },
         
-        items: [{
-          ...order.items?.[0],
-          barType: formData.barType,
-          length: formData.length,
-          quantity: formData.quantity,
-          totalWeight: formData.quantity,
-          pricePerTonne: formData.pricePerTonne
-        }],
+        // Update items with full product data
+        items: formData.items.map(item => ({
+          itemCode: item.itemCode,
+          productName: item.productName,
+          description: item.description,
+          category: item.category,
+          material: item.material,
+          finish: item.finish,
+          dimensions: item.dimensions,
+          specifications: item.specifications,
+          tags: item.tags,
+          quantity: parseFloat(item.quantity) || 0,
+          unitPrice: parseFloat(item.unitPrice) || 0,
+          pricePerUnit: item.pricePerUnit,
+          currency: item.currency,
+          totalWeight: parseFloat(item.totalWeight) || parseFloat(item.quantity) || 0,
+          isACRSCertified: item.isACRSCertified,
+          weight: item.weight,
+          // Legacy fields for backward compatibility
+          barType: item.productName,
+          length: item.dimensions?.length || '',
+          pricePerTonne: item.pricePerUnit === 'tonne' ? item.unitPrice : 0
+        })),
         
         subtotal: formData.subtotal,
         gst: formData.gst,
         totalAmount: formData.totalAmount,
         
-        paymentTerms: formData.paymentTerms,
-        deliveryTerms: formData.deliveryTerms,
-        quantityTolerance: formData.quantityTolerance,
-        invoicingBasis: formData.invoicingBasis,
-        packing: formData.packing,
+        paymentTerms: formData.contractTerms.paymentTerms,
+        deliveryTerms: formData.contractTerms.deliveryTerms,
+        quantityTolerance: formData.contractTerms.quantityTolerance,
+        invoicingBasis: formData.contractTerms.invoicingBasis,
+        packing: formData.contractTerms.packing,
+        documentation: formData.contractTerms.documentation,
         
         estimatedDelivery: formData.estimatedDelivery ? new Date(formData.estimatedDelivery) : order.estimatedDelivery,
         shipmentDetails: formData.shipmentDetails,
-        documentation: formData.documentation,
         notes: formData.notes,
         reference: formData.reference,
         
@@ -422,6 +656,13 @@ const OrderContractEditor = () => {
 
   const closeSalesContractGenerator = () => {
     setShowContractGenerator(false);
+  };
+
+  const formatPrice = (price, currency = 'AUD') => {
+    return new Intl.NumberFormat('en-AU', {
+      style: 'currency',
+      currency: currency
+    }).format(price);
   };
 
   if (loading) {
@@ -729,7 +970,7 @@ const OrderContractEditor = () => {
                     placeholder="John Smith"
                   />
                 </div>
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                     <input
@@ -842,81 +1083,253 @@ const OrderContractEditor = () => {
               transition={{ duration: 0.3, delay: 0.4 }}
               className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
             >
-              <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                <Package className="w-5 h-5 text-purple-600" />
-                Product Information
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Product Description</label>
-                  <textarea
-                    value={formData.productDescription || ''}
-                    onChange={(e) => handleInputChange('productDescription', e.target.value)}
-                    rows="2"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder={`${formData.barType || 'N16'} x ${formData.length || 6}`}
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bar Type *</label>
-                    <select
-                      value={formData.barType || ''}
-                      onChange={(e) => handleInputChange('barType', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="">Select</option>
-                      <option value="N12">N12</option>
-                      <option value="N16">N16</option>
-                      <option value="N20">N20</option>
-                      <option value="N24">N24</option>
-                      <option value="N28">N28</option>
-                      <option value="N32">N32</option>
-                      <option value="N36">N36</option>
-                      <option value="N40">N40</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Length (m)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={formData.length || ''}
-                      onChange={(e) => handleInputChange('length', parseFloat(e.target.value))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="6"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (t) *</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={formData.quantity || ''}
-                      onChange={(e) => {
-                        handleInputChange('quantity', parseFloat(e.target.value));
-                        setTimeout(calculateTotals, 100);
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="25"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Price per Tonne (AUD) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.pricePerTonne || ''}
-                    onChange={(e) => {
-                      handleInputChange('pricePerTonne', parseFloat(e.target.value));
-                      setTimeout(calculateTotals, 100);
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="1095.00"
-                  />
-                </div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                  <Package className="w-5 h-5 text-purple-600" />
+                  Product Information ({formData.items.length} item{formData.items.length !== 1 ? 's' : ''})
+                </h3>
+                <button
+                  onClick={addNewItem}
+                  className="px-3 py-1 bg-teal-600 text-white rounded-md hover:bg-teal-700 transition-colors flex items-center gap-1 text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Item
+                </button>
               </div>
+
+              {formData.items.map((item, itemIndex) => (
+                <div key={itemIndex} className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50/50">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-medium text-gray-900">Item {itemIndex + 1}</h4>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowProductSelector(true)}
+                        className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1 text-sm"
+                      >
+                        <Search className="w-4 h-4" />
+                        Select Product
+                      </button>
+                      {formData.items.length > 1 && (
+                        <button
+                          onClick={() => removeItem(itemIndex)}
+                          className="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-1 text-sm"
+                        >
+                          <X className="w-4 h-4" />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Product Basic Info */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Item Code</label>
+                        <input
+                          type="text"
+                          value={item.itemCode || ''}
+                          onChange={(e) => handleInputChange('itemCode', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="FBSB321330"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+                        <input
+                          type="text"
+                          value={item.productName || ''}
+                          onChange={(e) => handleInputChange('productName', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="Product Name"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                      <textarea
+                        value={item.description || ''}
+                        onChange={(e) => handleInputChange('description', e.target.value, itemIndex)}
+                        rows="2"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                        placeholder="Product description"
+                      />
+                    </div>
+
+                    {/* Category, Material, Finish */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                        <input
+                          type="text"
+                          value={item.category || ''}
+                          onChange={(e) => handleInputChange('category', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="Category"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
+                        <input
+                          type="text"
+                          value={item.material || ''}
+                          onChange={(e) => handleInputChange('material', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="Material"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Finish</label>
+                        <input
+                          type="text"
+                          value={item.finish || ''}
+                          onChange={(e) => handleInputChange('finish', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="Finish"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dimensions */}
+                    <div className="bg-white p-3 rounded-md border">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                        <Ruler className="w-4 h-4" />
+                        Dimensions
+                      </h5>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Length</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={item.dimensions?.length || ''}
+                            onChange={(e) => handleInputChange('dimensions.length', e.target.value, itemIndex)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                            placeholder="1330"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Diameter</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={item.dimensions?.diameter || ''}
+                            onChange={(e) => handleInputChange('dimensions.diameter', e.target.value, itemIndex)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                            placeholder="32"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Unit</label>
+                          <select
+                            value={item.dimensions?.unit || 'mm'}
+                            onChange={(e) => handleInputChange('dimensions.unit', e.target.value, itemIndex)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                          >
+                            <option value="mm">mm</option>
+                            <option value="cm">cm</option>
+                            <option value="m">m</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pricing and Quantity */}
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={item.quantity || ''}
+                          onChange={(e) => {
+                            handleInputChange('quantity', parseFloat(e.target.value), itemIndex);
+                            setTimeout(calculateTotals, 100);
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price *</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={item.unitPrice || ''}
+                          onChange={(e) => {
+                            handleInputChange('unitPrice', parseFloat(e.target.value), itemIndex);
+                            setTimeout(calculateTotals, 100);
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                          placeholder="14.92"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Per</label>
+                        <select
+                          value={item.pricePerUnit || 'each'}
+                          onChange={(e) => handleInputChange('pricePerUnit', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                        >
+                          <option value="each">Each</option>
+                          <option value="meter">Per Meter</option>
+                          <option value="kg">Per Kg</option>
+                          <option value="tonne">Per Tonne</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                        <select
+                          value={item.currency || 'AUD'}
+                          onChange={(e) => handleInputChange('currency', e.target.value, itemIndex)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                        >
+                          <option value="AUD">AUD</option>
+                          <option value="USD">USD</option>
+                          <option value="MYR">MYR</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* ACRS Certification */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`acrs-${itemIndex}`}
+                        checked={item.isACRSCertified || false}
+                        onChange={(e) => handleInputChange('isACRSCertified', e.target.checked, itemIndex)}
+                        className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                      />
+                      <label htmlFor={`acrs-${itemIndex}`} className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                        <Shield className="w-4 h-4 text-blue-600" />
+                        ACRS Certified
+                      </label>
+                    </div>
+
+                    {/* Tags Display */}
+                    {item.tags && item.tags.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
+                        <div className="flex flex-wrap gap-1">
+                          {item.tags.map((tag, tagIndex) => (
+                            <span key={tagIndex} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Item Total */}
+                    <div className="bg-green-50 p-2 rounded border-l-4 border-green-400">
+                      <div className="text-sm font-medium text-green-800">
+                        Item Total: {formatPrice((item.quantity || 0) * (item.unitPrice || 0), item.currency)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </motion.div>
 
             {/* Financial Summary */}
@@ -962,8 +1375,8 @@ const OrderContractEditor = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Payment Terms</label>
                   <input
                     type="text"
-                    value={formData.paymentTerms || ''}
-                    onChange={(e) => handleInputChange('paymentTerms', e.target.value)}
+                    value={formData.contractTerms?.paymentTerms || ''}
+                    onChange={(e) => handleInputChange('contractTerms.paymentTerms', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="30 Days from delivery to yard"
                   />
@@ -972,8 +1385,8 @@ const OrderContractEditor = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Terms</label>
                   <input
                     type="text"
-                    value={formData.deliveryTerms || ''}
-                    onChange={(e) => handleInputChange('deliveryTerms', e.target.value)}
+                    value={formData.contractTerms?.deliveryTerms || ''}
+                    onChange={(e) => handleInputChange('contractTerms.deliveryTerms', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Delivery Duty paid - unloading by purchaser"
                   />
@@ -983,193 +1396,312 @@ const OrderContractEditor = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Quantity Tolerance</label>
                     <input
                       type="text"
-                      value={formData.quantityTolerance || ''}
-                      onChange={(e) => handleInputChange('quantityTolerance', e.target.value)}
+                      value={formData.contractTerms?.quantityTolerance || ''}
+                      onChange={(e) => handleInputChange('contractTerms.quantityTolerance', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="+/- 10%"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Invoicing Basis</label>
-                    <input
-                      type="text"
-                      value={formData.invoicingBasis || ''}
-                      onChange={(e) => handleInputChange('invoicingBasis', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Theoretical Weight"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Packing</label>
-                  <input
-                    type="text"
-                    value={formData.packing || ''}
-                    onChange={(e) => handleInputChange('packing', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Mill's Standard for Export"
-                  />
-                </div>
-              </div>
-            </motion.div>
+                     placeholder="+/- 10%"
+                   />
+                 </div>
+                 <div>
+                   <label className="block text-sm font-medium text-gray-700 mb-1">Invoicing Basis</label>
+                   <input
+                     type="text"
+                     value={formData.contractTerms?.invoicingBasis || ''}
+                     onChange={(e) => handleInputChange('contractTerms.invoicingBasis', e.target.value)}
+                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                     placeholder="Theoretical Weight"
+                   />
+                 </div>
+               </div>
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Packing</label>
+                 <input
+                   type="text"
+                   value={formData.contractTerms?.packing || ''}
+                   onChange={(e) => handleInputChange('contractTerms.packing', e.target.value)}
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="Mill's Standard for Export"
+                 />
+               </div>
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Documentation</label>
+                 <textarea
+                   value={formData.contractTerms?.documentation || ''}
+                   onChange={(e) => handleInputChange('contractTerms.documentation', e.target.value)}
+                   rows="3"
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="Commercial Invoice&#10;Certificate of Origin&#10;Mill Test Certificates&#10;ACRS Certification"
+                 />
+               </div>
+             </div>
+           </motion.div>
 
-            {/* Delivery Information */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.7 }}
-              className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
-            >
-              <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                <Truck className="w-5 h-5 text-blue-600" />
-                Delivery Information
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Delivery Date</label>
-                  <input
-                    type="date"
-                    value={formData.estimatedDelivery || ''}
-                    onChange={(e) => handleInputChange('estimatedDelivery', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Details</label>
-                  <textarea
-                    value={formData.shipmentDetails || ''}
-                    onChange={(e) => handleInputChange('shipmentDetails', e.target.value)}
-                    rows="2"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="End June shipment, arrival and delivery by end August 2025"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Documentation</label>
-                  <textarea
-                    value={formData.documentation || ''}
-                    onChange={(e) => handleInputChange('documentation', e.target.value)}
-                    rows="4"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Commercial Invoice&#10;Certificate of Origin&#10;Mill Test Certificates&#10;ACRS Certification"
-                  />
-                </div>
-              </div>
-            </motion.div>
+           {/* Delivery Information */}
+           <motion.div
+             initial={{ opacity: 0, y: 20 }}
+             animate={{ opacity: 1, y: 0 }}
+             transition={{ duration: 0.3, delay: 0.7 }}
+             className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
+           >
+             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+               <Truck className="w-5 h-5 text-blue-600" />
+               Delivery Information
+             </h3>
+             <div className="space-y-4">
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Delivery Date</label>
+                 <input
+                   type="date"
+                   value={formData.estimatedDelivery || ''}
+                   onChange={(e) => handleInputChange('estimatedDelivery', e.target.value)}
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                 />
+               </div>
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Details</label>
+                 <textarea
+                   value={formData.shipmentDetails || ''}
+                   onChange={(e) => handleInputChange('shipmentDetails', e.target.value)}
+                   rows="2"
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="End June shipment, arrival and delivery by end August 2025"
+                 />
+               </div>
+             </div>
+           </motion.div>
 
-            {/* Additional Notes */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.8 }}
-              className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
-            >
-              <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                <Edit3 className="w-5 h-5 text-indigo-600" />
-                Additional Information
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
-                  <input
-                    type="text"
-                    value={formData.reference || ''}
-                    onChange={(e) => handleInputChange('reference', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Project reference or internal notes"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Special Instructions or Notes</label>
-                  <textarea
-                    value={formData.notes || ''}
-                    onChange={(e) => handleInputChange('notes', e.target.value)}
-                    rows="3"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Any special delivery instructions, quality requirements, or additional terms..."
-                  />
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </div>
+           {/* Additional Notes */}
+           <motion.div
+             initial={{ opacity: 0, y: 20 }}
+             animate={{ opacity: 1, y: 0 }}
+             transition={{ duration: 0.3, delay: 0.8 }}
+             className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
+           >
+             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+               <Edit3 className="w-5 h-5 text-indigo-600" />
+               Additional Information
+             </h3>
+             <div className="space-y-4">
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
+                 <input
+                   type="text"
+                   value={formData.reference || ''}
+                   onChange={(e) => handleInputChange('reference', e.target.value)}
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="Project reference or internal notes"
+                 />
+               </div>
+               <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Special Instructions or Notes</label>
+                 <textarea
+                   value={formData.notes || ''}
+                   onChange={(e) => handleInputChange('notes', e.target.value)}
+                   rows="3"
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="Any special delivery instructions, quality requirements, or additional terms..."
+                 />
+               </div>
+             </div>
+           </motion.div>
+         </div>
+       </div>
 
-        {/* Action Buttons Footer */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.9 }}
-          className="mt-8 bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
-        >
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-sm text-gray-600">
-              {hasChanges ? (
-                <span className="flex items-center gap-2 text-amber-600">
-                  <Clock className="w-4 h-4" />
-                  You have unsaved changes. Save before generating contract.
-                </span>
-              ) : (
-                <span className="flex items-center gap-2 text-green-600">
-                  <CheckCircle className="w-4 h-4" />
-                  All changes saved. Ready to generate contract.
-                </span>
-              )}
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleBackToInvoices}
-                className="px-6 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              
-              <button
-                onClick={handleSave}
-                disabled={saving || !hasChanges}
-                className={`px-6 py-2 rounded-lg transition-all duration-200 flex items-center gap-2 ${
-                  hasChanges
-                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
-                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
-              >
-                {saving ? (
-                  <Loader className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-              
-              <button
-                onClick={handleGenerateContract}
-                className="px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 flex items-center gap-2 shadow-lg"
-              >
-                <FileSignature className="w-4 h-4" />
-                Generate Contract
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      </div>
+       {/* Action Buttons Footer */}
+       <motion.div
+         initial={{ opacity: 0, y: 20 }}
+         animate={{ opacity: 1, y: 0 }}
+         transition={{ duration: 0.3, delay: 0.9 }}
+         className="mt-8 bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-white/50 shadow-lg"
+       >
+         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+           <div className="text-sm text-gray-600">
+             {hasChanges ? (
+               <span className="flex items-center gap-2 text-amber-600">
+                 <Clock className="w-4 h-4" />
+                 You have unsaved changes. Save before generating contract.
+               </span>
+             ) : (
+               <span className="flex items-center gap-2 text-green-600">
+                 <CheckCircle className="w-4 h-4" />
+                 All changes saved. Ready to generate contract.
+               </span>
+             )}
+           </div>
+           
+           <div className="flex items-center gap-3">
+             <button
+               onClick={handleBackToInvoices}
+               className="px-6 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg hover:bg-gray-50"
+             >
+               Cancel
+             </button>
+             
+             <button
+               onClick={handleSave}
+               disabled={saving || !hasChanges}
+               className={`px-6 py-2 rounded-lg transition-all duration-200 flex items-center gap-2 ${
+                 hasChanges
+                   ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
+                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+               }`}
+             >
+               {saving ? (
+                 <Loader className="w-4 h-4 animate-spin" />
+               ) : (
+                 <Save className="w-4 h-4" />
+               )}
+               {saving ? 'Saving...' : 'Save Changes'}
+             </button>
+             
+             <button
+               onClick={handleGenerateContract}
+               className="px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 flex items-center gap-2 shadow-lg"
+             >
+               <FileSignature className="w-4 h-4" />
+               Generate Contract
+             </button>
+           </div>
+         </div>
+       </motion.div>
+     </div>
 
-      {/* Sales Contract Generator Modal */}
-      {showContractGenerator && order && (
-        <SalesContractGenerator 
-          order={{
-            ...order,
-            ...formData,
-            // Include authorized emails
-            authorizedEmails: selectedAuthorizedEmails,
-            customerCompanyData: {
-              abn: formData.customerInfo?.abn
-            }
-          }}
-          onClose={closeSalesContractGenerator}
-        />
-      )}
-    </div>
-  );
+     {/* Product Selector Modal */}
+     {showProductSelector && (
+       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+         <motion.div
+           initial={{ opacity: 0, scale: 0.9 }}
+           animate={{ opacity: 1, scale: 1 }}
+           transition={{ duration: 0.2 }}
+           className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden"
+         >
+           <div className="bg-gradient-to-r from-teal-50 to-blue-50 border-b border-teal-100 p-6">
+             <div className="flex items-center justify-between">
+               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                 <Package className="w-6 h-6 text-teal-600" />
+                 Select Product
+               </h2>
+               <button
+                 onClick={() => setShowProductSelector(false)}
+                 className="p-2 hover:bg-teal-100 rounded-lg transition-colors"
+               >
+                 <X className="w-5 h-5 text-gray-500" />
+               </button>
+             </div>
+             
+             {/* Search */}
+             <div className="mt-4 relative">
+               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+               <input
+                 type="text"
+                 placeholder="Search products by code, name, category, material..."
+                 value={productSearch}
+                 onChange={(e) => setProductSearch(e.target.value)}
+                 className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+               />
+             </div>
+           </div>
+
+           <div className="p-6 max-h-96 overflow-y-auto">
+             {filteredProducts.length === 0 ? (
+               <div className="text-center py-8 text-gray-500">
+                 <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                 <p>No products found</p>
+               </div>
+             ) : (
+               <div className="grid grid-cols-1 gap-4">
+                 {filteredProducts.map((product) => (
+                   <div
+                     key={product.id}
+                     onClick={() => selectProduct(product)}
+                     className="p-4 border border-gray-200 rounded-lg hover:border-teal-300 hover:bg-teal-50/50 cursor-pointer transition-all"
+                   >
+                     <div className="flex items-start justify-between">
+                       <div className="flex-1">
+                         <div className="flex items-center gap-2 mb-1">
+                           <span className="font-medium text-gray-900">{product.itemCode}</span>
+                           {product.isACRSCertified && (
+                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-800">
+                               <Shield className="w-3 h-3 mr-1" />
+                               ACRS
+                             </span>
+                           )}
+                         </div>
+                         <h4 className="font-medium text-gray-900 mb-1">{product.productName}</h4>
+                         <p className="text-sm text-gray-600 mb-2">{product.description}</p>
+                         
+                         <div className="flex items-center gap-4 text-xs text-gray-500">
+                           <span className="flex items-center gap-1">
+                             <Tag className="w-3 h-3" />
+                             {product.category}
+                           </span>
+                           <span>{product.material}</span>
+                           {product.dimensions?.diameter && (
+                             <span className="flex items-center gap-1">
+                               <Ruler className="w-3 h-3" />
+                               ⌀{product.dimensions.diameter}{product.dimensions.unit}
+                             </span>
+                           )}
+                           {product.weight && (
+                             <span className="flex items-center gap-1">
+                               <Weight className="w-3 h-3" />
+                               {product.weight}kg
+                             </span>
+                           )}
+                         </div>
+                         
+                         {product.tags && product.tags.length > 0 && (
+                           <div className="flex flex-wrap gap-1 mt-2">
+                             {product.tags.slice(0, 3).map((tag, index) => (
+                               <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-800">
+                                 {tag}
+                               </span>
+                             ))}
+                             {product.tags.length > 3 && (
+                               <span className="text-xs text-gray-500">+{product.tags.length - 3}</span>
+                             )}
+                           </div>
+                         )}
+                       </div>
+                       
+                       <div className="text-right">
+                         <div className="font-medium text-gray-900">
+                           {formatPrice(product.pricing?.unitPrice, product.pricing?.currency)}
+                         </div>
+                         <div className="text-sm text-gray-500">
+                           per {product.pricing?.pricePerUnit}
+                         </div>
+                         <div className="text-xs text-gray-500 mt-1">
+                           Stock: {product.stock?.quantity || 0}
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+             )}
+           </div>
+         </motion.div>
+       </div>
+     )}
+
+     {/* Sales Contract Generator Modal */}
+     {showContractGenerator && order && (
+       <SalesContractGenerator 
+         order={{
+           ...order,
+           ...formData,
+           // Include authorized emails
+           authorizedEmails: selectedAuthorizedEmails,
+           customerCompanyData: {
+             abn: formData.customerInfo?.abn
+           }
+         }}
+         onClose={closeSalesContractGenerator}
+       />
+     )}
+   </div>
+ );
 };
 
 export default OrderContractEditor;
