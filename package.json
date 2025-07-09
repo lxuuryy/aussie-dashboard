@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^6.24.0",
     "@googlemaps/js-api-loader": "^1.16.10",
     "firebase": "^11.10.0",
     "framer-motion": "^12.23.0",
