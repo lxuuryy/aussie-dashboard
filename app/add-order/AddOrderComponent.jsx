@@ -1098,39 +1098,44 @@ const AddOrderComponent = () => {
                     {/* Product Tabs */}
                     <div className="mb-6">
                       <div className="flex flex-wrap gap-2 mb-4 border-b border-blue-200 pb-4">
-                        {products.map((product, index) => (
-                          <button
-                            key={product.id}
-                            type="button"
-                            onClick={() => setCurrentProductIndex(index)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors relative ${
-                              currentProductIndex === index
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-white text-blue-600 border border-blue-200 hover:bg-blue-50'
-                            }`}
-                          >
-                            <Package className="w-4 h-4" />
-                            <span className="font-medium">Item {index + 1}</span>
-                            {product.productName && (
-                              <span className="text-xs opacity-75 max-w-24 truncate">
-                                {product.productName}
-                              </span>
-                            )}
-                            {products.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeProduct(index);
-                                }}
-                                className="ml-2 p-1 hover:bg-red-100 rounded-full text-red-600 transition-colors"
-                                title="Remove this product"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            )}
-                          </button>
-                        ))}
+                          {products.map((product, index) => {
+        const isActive = currentProductIndex === index;
+        
+        return (
+          <div
+            key={product.id}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors relative ${
+              isActive
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-blue-600 border border-blue-200 hover:bg-blue-50'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setCurrentProductIndex(index)}
+              className="flex items-center gap-2 flex-1"
+            >
+              <Package className="w-4 h-4" />
+              <span className="font-medium">Item {index + 1}</span>
+              {product.productName && (
+                <span className="text-xs opacity-75 max-w-24 truncate">
+                  {product.productName}
+                </span>
+              )}
+            </button>
+            {products.length > 1 && (
+              <button
+                type="button"
+                onClick={() => removeProduct(index)}
+                className="ml-2 p-1 hover:bg-red-100 rounded-full text-red-600 transition-colors"
+                title="Remove this product"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        );
+      })}
                       </div>
 
                       {/* Product Summary Cards */}
