@@ -1,26 +1,114 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+
+
+
+/* Add these styles to your invoice CSS to fix print colors */
+
+/* Force print colors and backgrounds */
+* {
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Enhanced table header styles for printing */
+.product-table th {
+    background-color: #4a9b8e !important;
+    color: white !important;
+    padding: 8px 5px;
+    text-align: center;
+    font-weight: bold;
+    border: 2px solid #000 !important;
+    /* Add these for better print visibility */
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Enhanced summary row styles */
+.summary-row.deposit {
+    background-color: #ffe6e6 !important;
+    padding: 10px;
+    margin-top: 10px;
+    font-weight: bold;
+    color: #d63384 !important;
+    border: 1px solid #d63384 !important;
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
 }
 
-body {
-  background: var(--background);
- 
-  font-family: Arial, Helvetica, sans-serif;
+.product-table .total-row {
+    background-color: #f8f9fa !important;
+    border: 1px solid #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
+}
+
+/* Enhanced print media queries */
+@media print {
+    * {
+        -webkit-print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    
+    body { 
+        padding: 10px; 
+        font-size: 11px;
+        -webkit-print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    
+    .no-print { 
+        display: none; 
+    }
+    
+    /* Force table header colors in print */
+    .product-table th {
+        background-color: #4a9b8e !important;
+        color: white !important;
+        border: 2px solid #000 !important;
+        -webkit-print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    
+    /* Force deposit row colors in print */
+    .summary-row.deposit {
+        background-color: #ffe6e6 !important;
+        color: #d63384 !important;
+        border: 2px solid #d63384 !important;
+        -webkit-print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    
+    /* Alternative: Use borders instead of background colors for critical elements */
+    .product-table th.print-alternative {
+        background: none !important;
+        color: #000 !important;
+        border: 3px solid #4a9b8e !important;
+        font-weight: bold !important;
+    }
+}
+
+/* Fallback styles using borders instead of backgrounds */
+@media print {
+    .fallback-header {
+        background: none !important;
+        border: 2px solid #4a9b8e !important;
+        color: #000 !important;
+        font-weight: bold !important;
+    }
+    
+    .fallback-deposit {
+        background: none !important;
+        border: 2px solid #d63384 !important;
+        color: #d63384 !important;
+        font-weight: bold !important;
+    }
 }

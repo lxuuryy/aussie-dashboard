@@ -25,10 +25,13 @@ import {
   Tag,
   Calculator,
   Wrench,
+  Search,
   PenTool
 } from 'lucide-react';
 import { collection, addDoc, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import ProductLookoutComponent from '../(components)/ProductLookoutComponent';
+
 import { db, storage } from '@/firebase';
 
 const AddOrderComponent = () => {
@@ -40,11 +43,14 @@ const AddOrderComponent = () => {
   // User email input state
   const [userEmail, setUserEmail] = useState('');
   const [newAuthorizedEmail, setNewAuthorizedEmail] = useState('');
+  const [showProductLookup, setShowProductLookup] = useState(false);
+  const [proformaInvoiceFile, setProformaInvoiceFile] = useState(null);
+
 
   // File upload states
   const [purchaseOrderFile, setPurchaseOrderFile] = useState(null);
   const [salesContractFile, setSalesContractFile] = useState(null);
-  const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0 });
+const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, proforma: 0 });
 
   // Signature form state
   const [signatureForm, setSignatureForm] = useState({
@@ -53,6 +59,14 @@ const AddOrderComponent = () => {
     signatureDate: new Date().toISOString().split('T')[0]
   });
 
+
+  const handleProductFromLookup = (selectedProductData) => {
+  // Update current product with selected data
+  updateProduct(currentProductIndex, 'itemCode', selectedProductData.itemCode);
+  updateProduct(currentProductIndex, 'productName', selectedProductData.productName);
+  // ... update all other fields
+  setShowProductLookup(false);
+};
   // Multi-product state
   const [products, setProducts] = useState([{
     id: Date.now(),
@@ -336,7 +350,9 @@ const AddOrderComponent = () => {
     setStep(1);
     setPurchaseOrderFile(null);
     setSalesContractFile(null);
-    setUploadProgress({ po: 0, contract: 0 });
+     setProformaInvoiceFile(null); // Add this line
+  setUploadProgress({ po: 0, contract: 0, proforma: 0 }); // Update t
+
     setUserEmail('');
     setCompanyData(null);
     setNewAuthorizedEmail('');
@@ -464,13 +480,14 @@ const AddOrderComponent = () => {
 
   // Handle file selection
   const handleFileSelect = (file, type) => {
-    if (type === 'po') {
-      setPurchaseOrderFile(file);
-    } else if (type === 'contract') {
-      setSalesContractFile(file);
-    }
-  };
-
+  if (type === 'po') {
+    setPurchaseOrderFile(file);
+  } else if (type === 'contract') {
+    setSalesContractFile(file);
+  } else if (type === 'proforma') {
+    setProformaInvoiceFile(file);
+  }
+};
   // Upload file to Firebase Storage
   const uploadFile = async (file, folder, fileName) => {
     try {
@@ -685,6 +702,17 @@ const AddOrderComponent = () => {
         setUploadProgress(prev => ({ ...prev, contract: 100 }));
       }
 
+      if (proformaInvoiceFile) {
+      console.log('Uploading proforma invoice...');
+      setUploadProgress(prev => ({ ...prev, proforma: 25 }));
+      
+      // Proforma invoice file name format: PO-{timestamp}_proforma_invoice_{ISO-date}.{extension}
+      const proformaFileName = `${poNumber}_proforma_invoice_${new Date().toISOString().replace(/[:.]/g, '-')}.${proformaInvoiceFile.name.split('.').pop()}`;
+      proformaUpload = await uploadFile(proformaInvoiceFile, 'proforma-invoices', proformaFileName);
+      
+      setUploadProgress(prev => ({ ...prev, proforma: 100 }));
+    }
+
       // Step 2: Prepare complete order data with uploaded file URLs
       const orderData = {
         // Basic order info
@@ -797,6 +825,9 @@ const AddOrderComponent = () => {
         signedContractUrl: contractUpload?.url || null,
         signedContractPath: contractUpload?.path || null,
         signedAt: contractUpload ? currentDate : null,
+        proformaInvoiceUrl: proformaUpload?.url || null,
+      proformaInvoicePath: proformaUpload?.path || null,
+      proformaInvoiceUploadedAt: proformaUpload ? currentDate : null,
         
         // Signature data - populate if sales contract uploaded
         signature: salesContractFile ? {
@@ -1585,6 +1616,23 @@ const AddOrderComponent = () => {
                     )}
                   </div>
 
+                  {showProductLookup && (
+  <ProductLookoutComponent
+    isOpen={showProductLookup}
+    onClose={() => setShowProductLookup(false)}
+    onProductSelect={handleProductFromLookup}
+    currentProductData={products[currentProductIndex]}
+  />
+)}
+
+<button
+  onClick={() => setShowProductLookup(true)}
+  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+>
+  <Search className="w-4 h-4" />
+  Lookup
+</button>
+
                   {/* Customer Information */}
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
@@ -1995,40 +2043,49 @@ const AddOrderComponent = () => {
                       Document Upload
                     </h3>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <FileUpload
-                        label="Purchase Order Document"
-                        file={purchaseOrderFile}
-                        onFileSelect={handleFileSelect}
-                        type="po"
-                        showSignatureFields={false}
-                      />
-                      
-                      <FileUpload
-                        label="Signed Sales Contract Document"
-                        file={salesContractFile}
-                        onFileSelect={handleFileSelect}
-                        type="contract"
-                        showSignatureFields={true}
-                      />
-                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6"> {/* Changed from grid-cols-2 to grid-cols-3 */}
+    <FileUpload
+      label="Purchase Order Document"
+      file={purchaseOrderFile}
+      onFileSelect={handleFileSelect}
+      type="po"
+      showSignatureFields={false}
+    />
+    
+    <FileUpload
+      label="Signed Sales Contract Document"
+      file={salesContractFile}
+      onFileSelect={handleFileSelect}
+      type="contract"
+      showSignatureFields={true}
+    />
+
+    <FileUpload
+      label="Proforma Invoice Document"
+      file={proformaInvoiceFile}
+      onFileSelect={handleFileSelect}
+      type="proforma"
+      showSignatureFields={false}
+    />
+  </div>
                     
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
-                        <div className="text-sm text-blue-800">
-                          <p className="font-medium mb-1">Document Upload Guidelines:</p>
-                          <ul className="space-y-1 text-blue-700">
-                            <li>• Purchase orders: PDF, DOC, DOCX, HTML → stored in /purchase-orders/</li>
-                            <li>• Sales contracts: Upload SIGNED contracts → stored in /signed-contracts/</li>
-                            <li>• If uploading sales contract, signature details are required</li>
-                            <li>• Contract status will be automatically set to "signed" when contract uploaded</li>
-                            <li>• Maximum file size: 10MB per document</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+    <div className="flex items-start gap-2">
+      <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+      <div className="text-sm text-blue-800">
+        <p className="font-medium mb-1">Document Upload Guidelines:</p>
+        <ul className="space-y-1 text-blue-700">
+          <li>• Purchase orders: PDF, DOC, DOCX, HTML → stored in /purchase-orders/</li>
+          <li>• Sales contracts: Upload SIGNED contracts → stored in /signed-contracts/</li>
+          <li>• Proforma invoices: PDF, DOC, DOCX, HTML → stored in /proforma-invoices/</li>
+          <li>• If uploading sales contract, signature details are required</li>
+          <li>• Contract status will be automatically set to "signed" when contract uploaded</li>
+          <li>• Maximum file size: 10MB per document</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
 
                   {/* Authorized Emails Section */}
                   <div className="bg-indigo-50 rounded-lg p-6">
@@ -2201,63 +2258,80 @@ const AddOrderComponent = () => {
               )}
 
               {step === 2 && (
-                <div className="text-center py-12">
-                  <Loader className="w-12 h-12 animate-spin mx-auto mb-4 text-teal-600" />
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing Order...</h3>
-                  <p className="text-gray-600 mb-6">Please wait while we create your order and upload documents.</p>
-                  
-                  {/* Upload Progress */}
-                  {(purchaseOrderFile || salesContractFile) && (
-                    <div className="space-y-4 max-w-md mx-auto">
-                      {purchaseOrderFile && (
-                        <div>
-                          <div className="flex justify-between text-sm text-gray-600 mb-1">
-                            <span>Purchase Order</span>
-                            <span>{uploadProgress.po}%</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div 
-                              className="bg-teal-600 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${uploadProgress.po}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {salesContractFile && (
-                        <div>
-                          <div className="flex justify-between text-sm text-gray-600 mb-1">
-                            <span>Signed Sales Contract</span>
-                            <span>{uploadProgress.contract}%</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div 
-                              className="bg-teal-600 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${uploadProgress.contract}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+  <div className="text-center py-12">
+    <Loader className="w-12 h-12 animate-spin mx-auto mb-4 text-teal-600" />
+    <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing Order...</h3>
+    <p className="text-gray-600 mb-6">Please wait while we create your order and upload documents.</p>
+    
+    {/* Upload Progress */}
+    {(purchaseOrderFile || salesContractFile || proformaInvoiceFile) && (
+      <div className="space-y-4 max-w-md mx-auto">
+        {purchaseOrderFile && (
+          <div>
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span>Purchase Order</span>
+              <span>{uploadProgress.po}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress.po}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+        
+        {salesContractFile && (
+          <div>
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span>Signed Sales Contract</span>
+              <span>{uploadProgress.contract}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress.contract}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
 
+        {proformaInvoiceFile && (
+          <div>
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span>Proforma Invoice</span>
+              <span>{uploadProgress.proforma}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress.proforma}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+)}
               {step === 3 && (
-                <div className="text-center py-12">
-                  <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                  <h2 className="text-2xl font-bold text-gray-800 mb-2">Order Created Successfully!</h2>
-                  <p className="text-gray-600 mb-6">
-                    Your order has been created{salesContractFile ? ' with signed contract' : ''}{purchaseOrderFile ? ' and purchase order uploaded' : ''}.
-                  </p>
-                  <button
-                    onClick={closeModal}
-                    className="px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
-                  >
-                    Continue
-                  </button>
-                </div>
-              )}
+  <div className="text-center py-12">
+    <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+    <h2 className="text-2xl font-bold text-gray-800 mb-2">Order Created Successfully!</h2>
+    <p className="text-gray-600 mb-6">
+      Your order has been created
+      {salesContractFile ? ' with signed contract' : ''}
+      {purchaseOrderFile ? ' and purchase order uploaded' : ''}
+      {proformaInvoiceFile ? ' and proforma invoice uploaded' : ''}.
+    </p>
+    <button
+      onClick={closeModal}
+      className="px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
+    >
+      Continue
+    </button>
+  </div>
+)}
             </div>
 
             {/* Footer */}

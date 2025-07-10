@@ -274,6 +274,10 @@ const revenue = ordersData.reduce((sum, invoice) => {
     router.push(`/orders/${order.id}`);
   };
 
+  const openPerformaInvoice = (order) => {
+router.push(`/performa-invoice/${order.id}`);
+  };
+
   const closeSalesContractGenerator = () => {
     setShowContractGenerator(false);
     setSelectedOrderForContract(null);
@@ -630,7 +634,13 @@ const revenue = ordersData.reduce((sum, invoice) => {
                               ) : (
                                 <span className="text-xs text-gray-400 px-2 py-1">No PDF</span>
                               )}
-                              
+                              <button
+                                onClick={() => openPerformaInvoice(invoice)}
+                                className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
+                                title="Create Performa Invoice"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
                               {/* Contract Editor Button */}
                               <button
                                 onClick={() => openContractEditor(invoice)}
@@ -639,6 +649,8 @@ const revenue = ordersData.reduce((sum, invoice) => {
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
+
+                              
                               
                               {/* Update Tracking Button */}
                               <button
@@ -771,6 +783,14 @@ const revenue = ordersData.reduce((sum, invoice) => {
                                   No PDF Available
                                 </span>
                               )}
+
+                              <button
+                                onClick={() => openPerformaInvoice(invoice)}
+                                className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                title="Edit Open Performa Invoice"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
                               
                               <button
                                 onClick={() => openContractEditor(invoice)}
