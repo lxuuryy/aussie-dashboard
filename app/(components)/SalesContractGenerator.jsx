@@ -1097,6 +1097,7 @@ const SalesContractGenerator = ({ order, onClose }) => {
            contractUrl: downloadURL,
            contractPath: filename,
            contractUploadedAt: new Date(),
+           salesContract: order.salesContract,
            updatedAt: new Date()
          });
          console.log('Order document updated successfully');
