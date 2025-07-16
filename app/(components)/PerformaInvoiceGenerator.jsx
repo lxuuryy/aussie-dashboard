@@ -187,6 +187,16 @@ const OrderEditor = () => {
     }));
   };
 
+  const updateCustomerCompanyData = (field, value) => {
+    setEditedOrder(prev => ({
+      ...prev,
+      customerCompanyData: {
+        ...prev.customerCompanyData,
+        [field]: value
+      }
+    }));
+  };
+
   const removeItem = (index) => {
     setEditedOrder(prev => ({
       ...prev,
@@ -989,14 +999,14 @@ const OrderEditor = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ABN</label>
-                <input
-                  type="text"
-                  value={editedOrder.customerInfo?.abn || ''}
-                  onChange={(e) => updateCustomerInfo('abn', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+  <label className="block text-sm font-medium text-gray-700 mb-1"> ABN</label>
+  <input
+    type="text"
+    value={editedOrder.customerCompanyData?.abn || editedOrder.customerInfo?.abn || editedOrder.companyData.abn ||''}
+    onChange={(e) => updateCustomerCompanyData('abn', e.target.value)}
+    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  />
+</div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>

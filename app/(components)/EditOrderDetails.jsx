@@ -111,6 +111,7 @@ const EditOrderDetails = () => {
       }
     },
     
+    
     // Delivery details
     deliveryAddress: {
       street: '',
@@ -257,7 +258,7 @@ const EditOrderDetails = () => {
           contactPerson: orderData.customerInfo?.contactPerson || '',
           email: orderData.customerInfo?.email || '',
           phone: orderData.customerInfo?.phone || '',
-          abn: orderData.customerInfo?.abn || '',
+          abn: orderData.customerCompanyData?.abn || orderData.customerInfo?.abn || '', // ✅ CORRECT - try customerCompanyData first
           address: {
             street: orderData.customerInfo?.address?.street || '',
             city: orderData.customerInfo?.address?.city || '',
@@ -723,6 +724,10 @@ const EditOrderDetails = () => {
         
         customerCompanyData: {
           abn: orderForm.customerInfo.abn
+        },
+
+        customerCompanyData: {
+          abn: orderForm.customerInfo.abn || orderForm.customerCompanyData?.abn || ''
         },
         
         // Delivery details
@@ -1595,16 +1600,16 @@ const EditOrderDetails = () => {
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-gray-700 mb-2">
-                 ABN
-               </label>
-               <input
-                 type="text"
-                 value={orderForm.customerInfo.abn}
-                 onChange={(e) => handleInputChange('order', 'customerInfo.abn', e.target.value)}
-                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-               />
-             </div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    ABN
+  </label>
+  <input
+    type="text"
+    value={orderForm.customerInfo?.abn || orderForm.customerCompanyData?.abn || orderForm.companyData.abn || '' }  // ✅ This is correct
+    onChange={(e) => handleInputChange('order', 'customerInfo.abn', e.target.value)}
+    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  />
+</div>
            </div>
 
            {/* Customer Address */}

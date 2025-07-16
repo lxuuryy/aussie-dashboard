@@ -192,6 +192,7 @@ const OrderContractEditor = () => {
       
       // Initialize form data
       initializeFormData(orderData);
+      console.log('Order data loaded:', orderData);
 
     } catch (error) {
       console.error('Error fetching order:', error);
