@@ -21,6 +21,56 @@ const OrderEditor = () => {
   const [error, setError] = useState(null);
   const [isEditing, setIsEditing] = useState(true);
 
+  // Helper function to safely format date for input
+  const formatDateForInput = (date) => {
+    if (!date) return '';
+    
+    try {
+      let dateObj;
+      if (date instanceof Date) {
+        dateObj = date;
+      } else if (typeof date === 'string') {
+        dateObj = new Date(date);
+      } else if (date.toDate && typeof date.toDate === 'function') {
+        // Firestore Timestamp
+        dateObj = date.toDate();
+      } else {
+        return '';
+      }
+      
+      // Check if date is valid
+      if (isNaN(dateObj.getTime())) {
+        return '';
+      }
+      
+      return dateObj.toISOString().split('T')[0];
+    } catch (error) {
+      console.error('Error formatting date for input:', error);
+      return '';
+    }
+  };
+
+  // Helper function to safely convert date
+  const parseDate = (date) => {
+    if (!date) return null;
+    
+    try {
+      if (date instanceof Date) {
+        return date;
+      } else if (typeof date === 'string') {
+        return new Date(date);
+      } else if (date.toDate && typeof date.toDate === 'function') {
+        // Firestore Timestamp
+        return date.toDate();
+      } else {
+        return null;
+      }
+    } catch (error) {
+      console.error('Error parsing date:', error);
+      return null;
+    }
+  };
+
   // Load order data
   useEffect(() => {
     if (orderId) {
@@ -43,10 +93,10 @@ const OrderEditor = () => {
       const orderData = {
         id: orderDoc.id,
         ...orderDoc.data(),
-        // Process dates
-        createdAt: orderDoc.data().createdAt?.toDate ? orderDoc.data().createdAt.toDate() : new Date(orderDoc.data().createdAt),
-        orderDate: orderDoc.data().orderDate?.toDate ? orderDoc.data().orderDate.toDate() : new Date(orderDoc.data().orderDate),
-        estimatedDelivery: orderDoc.data().estimatedDelivery?.toDate ? orderDoc.data().estimatedDelivery.toDate() : (orderDoc.data().estimatedDelivery ? new Date(orderDoc.data().estimatedDelivery) : null),
+        // Process dates safely
+        createdAt: parseDate(orderDoc.data().createdAt) || new Date(),
+        orderDate: parseDate(orderDoc.data().orderDate) || new Date(),
+        estimatedDelivery: parseDate(orderDoc.data().estimatedDelivery),
       };
 
       setOriginalOrder(orderData);
@@ -255,14 +305,16 @@ const OrderEditor = () => {
     if (!date) return 'TBD';
     
     try {
-      if (date instanceof Date) {
-        return date.toLocaleDateString('en-AU', {
-          day: '2-digit',
-          month: '2-digit', 
-          year: 'numeric'
-        });
+      const dateObj = parseDate(date);
+      if (!dateObj || isNaN(dateObj.getTime())) {
+        return 'TBD';
       }
-      return 'TBD';
+      
+      return dateObj.toLocaleDateString('en-AU', {
+        day: '2-digit',
+        month: '2-digit', 
+        year: 'numeric'
+      });
     } catch (error) {
       return 'TBD';
     }
@@ -272,7 +324,7 @@ const OrderEditor = () => {
     return new Promise((resolve) => {
       const invoiceNumber = editedOrder.proformaInvoice || generateInvoiceNumber();
       const currentDate = new Date();
-      const dueDate = editedOrder.estimatedDelivery || new Date(currentDate.getTime() + (30 * 24 * 60 * 60 * 1000));
+      const dueDate = parseDate(editedOrder.estimatedDelivery) || new Date(currentDate.getTime() + (30 * 24 * 60 * 60 * 1000));
 
       // Generate product table rows
       const generateProductTableRows = () => {
@@ -1068,8 +1120,8 @@ const OrderEditor = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Delivery Date</label>
                 <input
                   type="date"
-                  value={editedOrder.estimatedDelivery ? editedOrder.estimatedDelivery.toISOString().split('T')[0] : ''}
-                  onChange={(e) => updateOrderField('estimatedDelivery', new Date(e.target.value))}
+                  value={formatDateForInput(editedOrder.estimatedDelivery)}
+                  onChange={(e) => updateOrderField('estimatedDelivery', e.target.value ? new Date(e.target.value) : null)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>

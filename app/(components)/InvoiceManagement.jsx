@@ -30,6 +30,19 @@ import {
 import { db } from '@/firebase';
 import { collection, query, orderBy, getDocs, where, addDoc, updateDoc, doc } from 'firebase/firestore';
 
+// shadcn/ui components
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
 // Import only the Sales Contract Generator (Editor will be a separate page)
 import SalesContractGenerator from './SalesContractGenerator'; // Adjust path as needed
 
@@ -143,24 +156,23 @@ const InvoiceManagement = () => {
       setInvoices(ordersData);
       
       // Calculate total revenue
-      // Calculate total revenue - with proper number parsing
-const revenue = ordersData.reduce((sum, invoice) => {
-  let amount = 0;
-  
-  // Try different possible amount fields and parse them properly
-  if (invoice.totalAmount) {
-    amount = parseFloat(String(invoice.totalAmount).replace(/[^0-9.-]/g, ''));
-  } else if (invoice.totals?.total) {
-    amount = parseFloat(String(invoice.totals.total).replace(/[^0-9.-]/g, ''));
-  } else if (invoice.total) {
-    amount = parseFloat(String(invoice.total).replace(/[^0-9.-]/g, ''));
-  }
-  
-  // Make sure we have a valid number
-  if (isNaN(amount)) amount = 0;
-  
-  return sum + amount;
-}, 0);
+      const revenue = ordersData.reduce((sum, invoice) => {
+        let amount = 0;
+        
+        // Try different possible amount fields and parse them properly
+        if (invoice.totalAmount) {
+          amount = parseFloat(String(invoice.totalAmount).replace(/[^0-9.-]/g, ''));
+        } else if (invoice.totals?.total) {
+          amount = parseFloat(String(invoice.totals.total).replace(/[^0-9.-]/g, ''));
+        } else if (invoice.total) {
+          amount = parseFloat(String(invoice.total).replace(/[^0-9.-]/g, ''));
+        }
+        
+        // Make sure we have a valid number
+        if (isNaN(amount)) amount = 0;
+        
+        return sum + amount;
+      }, 0);
       setTotalRevenue(revenue);
 
     } catch (error) {
@@ -249,15 +261,13 @@ const revenue = ordersData.reduce((sum, invoice) => {
       return {
         status: 'completed',
         label: 'Completed',
-        icon: CheckCircle,
-        className: 'text-green-600 bg-green-100'
+        variant: 'default'
       };
     } else {
       return {
         status: 'pending',
         label: 'Pending PDF',
-        icon: Clock,
-        className: 'text-amber-600 bg-amber-100'
+        variant: 'secondary'
       };
     }
   };
@@ -275,7 +285,7 @@ const revenue = ordersData.reduce((sum, invoice) => {
   };
 
   const openPerformaInvoice = (order) => {
-router.push(`/performa-invoice/${order.id}`);
+    router.push(`/performa-invoice/${order.id}`);
   };
 
   const closeSalesContractGenerator = () => {
@@ -405,164 +415,161 @@ router.push(`/performa-invoice/${order.id}`);
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Invoice Management</h1>
               <p className="text-gray-600 text-sm sm:text-base">Manage and track all customer purchase orders and invoices</p>
             </div>
-            <button
-              onClick={fetchInvoices}
-              className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center gap-2 self-start sm:self-auto"
-            >
-              <RefreshCw className="w-4 h-4" />
+            <Button onClick={fetchInvoices} className="self-start sm:self-auto">
+              <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
-            </button>
+            </Button>
           </div>
 
           {/* Stats Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
-            <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-1">Total Invoices</p>
-                  <p className="text-lg sm:text-2xl font-bold text-gray-900">{invoices.length}</p>
+            <Card>
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Total Invoices</p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900">{invoices.length}</p>
+                  </div>
+                  <FileText className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" />
                 </div>
-                <FileText className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" />
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-1">Total Revenue</p>
-                  <p className="text-lg sm:text-2xl font-bold text-gray-900">{formatCurrency(totalRevenue)}</p>
+            <Card>
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Total Revenue</p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900">{formatCurrency(totalRevenue)}</p>
+                  </div>
+                  <DollarSign className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
                 </div>
-                <DollarSign className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-1">Completed</p>
-                  <p className="text-lg sm:text-2xl font-bold text-gray-900">
-                    {invoices.filter(inv => inv.pdfUrl).length}
-                  </p>
+            <Card>
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Completed</p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900">
+                      {invoices.filter(inv => inv.pdfUrl).length}
+                    </p>
+                  </div>
+                  <CheckCircle className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
                 </div>
-                <CheckCircle className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-1">Pending PDF</p>
-                  <p className="text-lg sm:text-2xl font-bold text-gray-900">
-                    {invoices.filter(inv => !inv.pdfUrl).length}
-                  </p>
+            <Card>
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Pending PDF</p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900">
+                      {invoices.filter(inv => !inv.pdfUrl).length}
+                    </p>
+                  </div>
+                  <Clock className="w-6 h-6 sm:w-8 sm:h-8 text-amber-600" />
                 </div>
-                <Clock className="w-6 h-6 sm:w-8 sm:h-8 text-amber-600" />
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
 
         {/* Filters and Search */}
-        <div className="bg-white rounded-lg p-4 sm:p-6 border shadow-sm mb-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* Search */}
-            <div className="relative sm:col-span-2 lg:col-span-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                type="text"
-                placeholder="Search invoices..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-              />
+        <Card className="mb-6">
+          <CardContent className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Search */}
+              <div className="relative sm:col-span-2 lg:col-span-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  type="text"
+                  placeholder="Search invoices..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Status Filter */}
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="pending">Pending PDF</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Date Filter */}
+              <Select value={dateFilter} onValueChange={setDateFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Time" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="week">This Week</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Sort */}
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="date-desc">Latest First</SelectItem>
+                  <SelectItem value="date-asc">Oldest First</SelectItem>
+                  <SelectItem value="amount-desc">Highest Amount</SelectItem>
+                  <SelectItem value="amount-asc">Lowest Amount</SelectItem>
+                  <SelectItem value="company">Company Name</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Results Count */}
+              <div className="flex items-center text-xs sm:text-sm text-gray-600 sm:col-span-2 lg:col-span-1">
+                Showing {filteredInvoices.length} of {invoices.length} invoices
+              </div>
             </div>
-
-            {/* Status Filter */}
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-            >
-              <option value="all">All Status</option>
-              <option value="completed">Completed</option>
-              <option value="pending">Pending PDF</option>
-            </select>
-
-            {/* Date Filter */}
-            <select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-            >
-              <option value="all">All Time</option>
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-            </select>
-
-            {/* Sort */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-            >
-              <option value="date-desc">Latest First</option>
-              <option value="date-asc">Oldest First</option>
-              <option value="amount-desc">Highest Amount</option>
-              <option value="amount-asc">Lowest Amount</option>
-              <option value="company">Company Name</option>
-            </select>
-
-            {/* Results Count */}
-            <div className="flex items-center text-xs sm:text-sm text-gray-600 sm:col-span-2 lg:col-span-1">
-              Showing {filteredInvoices.length} of {invoices.length} invoices
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Responsive Invoices Table/Cards */}
-        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+        <Card>
           {filteredInvoices.length === 0 ? (
-            <div className="p-8 sm:p-12 text-center">
+            <CardContent className="p-8 sm:p-12 text-center">
               <FileText className="w-12 h-12 sm:w-16 sm:h-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No invoices found</h3>
               <p className="text-gray-600">Try adjusting your search criteria or filters.</p>
-            </div>
+            </CardContent>
           ) : (
             <>
               {/* Desktop Table View */}
-              <div className="hidden lg:block overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Invoice Details
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Customer
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Product
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Amount
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Order Status
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Invoice Details</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Order Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {filteredInvoices.map((invoice) => {
                       const statusInfo = getStatusInfo(invoice);
-                      const StatusIcon = statusInfo.icon;
 
                       return (
-                        <tr key={invoice.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-6 py-4">
+                        <TableRow key={invoice.id} className="hover:bg-gray-50">
+                          <TableCell>
                             <div>
                               <div className="font-medium text-gray-900">{invoice.poNumber}</div>
                               <div className="text-sm text-gray-600">
@@ -574,9 +581,9 @@ router.push(`/performa-invoice/${order.id}`);
                                 </div>
                               )}
                             </div>
-                          </td>
+                          </TableCell>
 
-                          <td className="px-6 py-4">
+                          <TableCell>
                             <div>
                               <div className="font-medium text-gray-900">
                                 {invoice.customerInfo?.companyName || 'Unknown Company'}
@@ -588,12 +595,12 @@ router.push(`/performa-invoice/${order.id}`);
                                 {invoice.customerInfo?.email}
                               </div>
                             </div>
-                          </td>
+                          </TableCell>
 
-                          <td className="px-6 py-4">
+                          <TableCell>
                             <div>
                               <div className="font-medium text-gray-900">
-                                {invoice.items?.[0]?.barType} × {invoice.items?.[0]?.length}m
+                                {invoice.items?.[0]?.productName} 
                               </div>
                               <div className="text-sm text-gray-600">
                                 {invoice.items?.[0]?.totalWeight || invoice.items?.[0]?.quantity}t @ {formatCurrency(invoice.items?.[0]?.pricePerTonne || 0)}/t
@@ -602,82 +609,94 @@ router.push(`/performa-invoice/${order.id}`);
                                 {invoice.salesContract}
                               </div>
                             </div>
-                          </td>
+                          </TableCell>
 
-                          <td className="px-6 py-4">
+                          <TableCell>
                             <div className="font-bold text-gray-900">
                               {formatCurrency(invoice.totalAmount)}
                             </div>
                             <div className="text-sm text-gray-600">
                               GST: {formatCurrency(invoice.gst)}
                             </div>
-                          </td>
+                          </TableCell>
 
-                          <td className="px-6 py-4">
+                          <TableCell>
                             {invoice.orderStatus && (
-                              <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
+                              <Badge variant="secondary" className="capitalize">
                                 {invoice.orderStatus}
-                              </div>
+                              </Badge>
                             )}
-                          </td>
+                          </TableCell>
 
-                          <td className="px-6 py-4">
+                          <TableCell>
                             <div className="flex items-center gap-2 flex-wrap">
                               {invoice.pdfUrl ? (
-                                <button
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => openInvoicePDF(invoice)}
-                                  className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
                                   title="View PDF"
                                 >
                                   <Eye className="w-4 h-4" />
-                                </button>
+                                </Button>
                               ) : (
-                                <span className="text-xs text-gray-400 px-2 py-1">No PDF</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Generate Purchase Order"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
                               )}
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => router.push(`/edit-order-details/${invoice.poNumber}`)}
+                                title="Edit Order Details"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => openPerformaInvoice(invoice)}
-                                className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
                                 title="Create Performa Invoice"
                               >
                                 <Edit className="w-4 h-4" />
-                              </button>
-                              {/* Contract Editor Button */}
-                              <button
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => openContractEditor(invoice)}
-                                className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
-                                title="Edit Contract Details"
+                                title="Generate Sales Contract"
                               >
                                 <Edit className="w-4 h-4" />
-                              </button>
-
-                              
-                              
-                              {/* Update Tracking Button */}
-                              <button
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => router.push(`/orders/tracker/${invoice.poNumber}`)}
-                                className="p-2 text-teal-600 hover:bg-teal-100 rounded-lg transition-colors"
                                 title="Update Order Tracking"
                               >
                                 <Truck className="w-4 h-4" />
-                              </button>
-                              
-                              {/* Show contract status */}
+                              </Button>
                               {invoice.contractUrl && (
-                                <button
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => window.open(invoice.contractUrl, '_blank')}
-                                  className="p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
                                   title="Open Sales Contract"
                                 >
                                   <ExternalLink className="w-3 h-3" />
-                                </button>
+                                </Button>
                               )}
                             </div>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
 
               {/* Mobile/Tablet Card View */}
@@ -697,9 +716,9 @@ router.push(`/performa-invoice/${order.id}`);
                           <div className="flex items-center gap-3 mb-2">
                             <h3 className="font-semibold text-gray-900 truncate">{invoice.poNumber}</h3>
                             {invoice.orderStatus && (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
+                              <Badge variant="secondary" className="capitalize">
                                 {invoice.orderStatus}
-                              </span>
+                              </Badge>
                             )}
                           </div>
                           <div className="text-sm text-gray-600 mb-1">
@@ -750,230 +769,229 @@ router.push(`/performa-invoice/${order.id}`);
                           <div>
                             <h4 className="text-sm font-medium text-gray-900 mb-2">Amount Details</h4>
                             <div className="text-sm text-gray-600 space-y-1">
-                              <div>Subtotal: {formatCurrency((invoice.totalAmount || 0) - (invoice.gst || 0))}</div>
-                              <div>GST: {formatCurrency(invoice.gst || 0)}</div>
-                              <div className="font-semibold text-gray-900">Total: {formatCurrency(invoice.totalAmount || 0)}</div>
-                            </div>
-                          </div>
+                             <div>Subtotal: {formatCurrency((invoice.totalAmount || 0) - (invoice.gst || 0))}</div>
+                             <div>GST: {formatCurrency(invoice.gst || 0)}</div>
+                             <div className="font-semibold text-gray-900">Total: {formatCurrency(invoice.totalAmount || 0)}</div>
+                           </div>
+                         </div>
 
-                          {/* Delivery Info */}
-                          {invoice.estimatedDelivery && (
-                            <div>
-                              <h4 className="text-sm font-medium text-gray-900 mb-2">Delivery</h4>
-                              <div className="text-sm text-gray-600">
-                                Estimated: {formatDate(invoice.estimatedDelivery)}
-                              </div>
-                            </div>
-                          )}
+                         {/* Delivery Info */}
+                         {invoice.estimatedDelivery && (
+                           <div>
+                             <h4 className="text-sm font-medium text-gray-900 mb-2">Delivery</h4>
+                             <div className="text-sm text-gray-600">
+                               Estimated: {formatDate(invoice.estimatedDelivery)}
+                             </div>
+                           </div>
+                         )}
 
-                          {/* Actions */}
-                          <div>
-                            <h4 className="text-sm font-medium text-gray-900 mb-2">Actions</h4>
-                            <div className="flex flex-wrap gap-2">
-                              {invoice.pdfUrl ? (
-                                <button
-                                  onClick={() => openInvoicePDF(invoice)}
-                                  className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                  View PDF
-                                </button>
-                              ) : (
-                                <span className="inline-flex items-center px-3 py-2 text-sm bg-gray-100 text-gray-500 rounded-lg">
-                                  No PDF Available
-                                </span>
-                              )}
+                         {/* Actions */}
+                         <div>
+                           <h4 className="text-sm font-medium text-gray-900 mb-2">Actions</h4>
+                           <div className="flex flex-wrap gap-2">
+                             {invoice.pdfUrl ? (
+                               <Button
+                                 variant="outline"
+                                 size="sm"
+                                 onClick={() => openInvoicePDF(invoice)}
+                               >
+                                 <Eye className="w-4 h-4 mr-2" />
+                                 View PDF
+                               </Button>
+                             ) : (
+                               <Badge variant="secondary">
+                                 No PDF Available
+                               </Badge>
+                             )}
 
-                              <button
-                                onClick={() => openPerformaInvoice(invoice)}
-                                className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                                title="Edit Open Performa Invoice"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              
-                              <button
-                                onClick={() => openContractEditor(invoice)}
-                                className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                              >
-                                <Edit className="w-4 h-4" />
-                                Edit Contract
-                              </button>
-                              
-                              <button
-                                onClick={() => router.push(`/orders/tracker/${invoice.poNumber}`)}
-                                className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-teal-100 text-teal-700 rounded-lg hover:bg-teal-200 transition-colors"
-                              >
-                                <Truck className="w-4 h-4" />
-                                Track Order
-                              </button>
-                              
-                              {invoice.contractUrl && (
-                                <button
-                                  onClick={() => window.open(invoice.contractUrl, '_blank')}
-                                  className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                  View Contract
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-        
-        {/* Sales Contract Generator Modal */}
-        {showContractGenerator && selectedOrderForContract && (
-          <SalesContractGenerator 
-            order={selectedOrderForContract}
-            onClose={closeSalesContractGenerator}
-          />
-        )}
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => openPerformaInvoice(invoice)}
+                               title="Edit Open Performa Invoice"
+                             >
+                               <Edit className="w-4 h-4 mr-2" />
+                               Performa
+                             </Button>
+                             
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => openContractEditor(invoice)}
+                             >
+                               <Edit className="w-4 h-4 mr-2" />
+                               Edit Contract
+                             </Button>
+                             
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => router.push(`/orders/tracker/${invoice.poNumber}`)}
+                             >
+                               <Truck className="w-4 h-4 mr-2" />
+                               Track Order
+                             </Button>
+                             
+                             {invoice.contractUrl && (
+                               <Button
+                                 variant="outline"
+                                 size="sm"
+                                 onClick={() => window.open(invoice.contractUrl, '_blank')}
+                               >
+                                 <ExternalLink className="w-4 h-4 mr-2" />
+                                 View Contract
+                               </Button>
+                             )}
+                           </div>
+                         </div>
+                       </div>
+                     )}
+                   </div>
+                 );
+               })}
+             </div>
+           </>
+         )}
+       </Card>
+       
+       {/* Sales Contract Generator Modal */}
+       {showContractGenerator && selectedOrderForContract && (
+         <SalesContractGenerator 
+           order={selectedOrderForContract}
+           onClose={closeSalesContractGenerator}
+         />
+       )}
 
-        {/* Order Tracking Modal */}
-        {showTrackingModal && selectedOrderForTracking && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Update Order Tracking</h2>
-                  <button
-                    onClick={closeTrackingModal}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <X className="w-5 h-5 text-gray-400" />
-                  </button>
-                </div>
+       {/* Order Tracking Modal */}
+       <Dialog open={showTrackingModal} onOpenChange={setShowTrackingModal}>
+         <DialogContent className="max-w-md">
+           <DialogHeader>
+             <DialogTitle>Update Order Tracking</DialogTitle>
+           </DialogHeader>
 
-                <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Order: <span className="font-medium">{selectedOrderForTracking.poNumber}</span></p>
-                  <p className="text-sm text-gray-600">Customer: <span className="font-medium">{selectedOrderForTracking.customerInfo?.companyName}</span></p>
-                </div>
+           {selectedOrderForTracking && (
+             <div className="space-y-4">
+               <Alert>
+                 <AlertDescription>
+                   <div className="space-y-1">
+                     <div>Order: <span className="font-medium">{selectedOrderForTracking.poNumber}</span></div>
+                     <div>Customer: <span className="font-medium">{selectedOrderForTracking.customerInfo?.companyName}</span></div>
+                   </div>
+                 </AlertDescription>
+               </Alert>
 
-                <form onSubmit={handleTrackingSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Order Status *
-                    </label>
-                    <select
-                      value={trackingData.status}
-                      onChange={(e) => setTrackingData(prev => ({...prev, status: e.target.value}))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="">Select status...</option>
-                      <option value="pending">Pending</option>
-                      <option value="confirmed">Confirmed</option>
-                      <option value="processing">Processing</option>
-                      <option value="shipped">Shipped</option>
-                      <option value="delivered">Delivered</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                  </div>
+               <form onSubmit={handleTrackingSubmit} className="space-y-4">
+                 <div>
+                   <Label htmlFor="status">Order Status *</Label>
+                   <Select 
+                     value={trackingData.status} 
+                     onValueChange={(value) => setTrackingData(prev => ({...prev, status: value}))}
+                     required
+                   >
+                     <SelectTrigger>
+                       <SelectValue placeholder="Select status..." />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="pending">Pending</SelectItem>
+                       <SelectItem value="confirmed">Confirmed</SelectItem>
+                       <SelectItem value="processing">Processing</SelectItem>
+                       <SelectItem value="shipped">Shipped</SelectItem>
+                       <SelectItem value="delivered">Delivered</SelectItem>
+                       <SelectItem value="completed">Completed</SelectItem>
+                       <SelectItem value="cancelled">Cancelled</SelectItem>
+                     </SelectContent>
+                   </Select>
+                 </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Location *
-                    </label>
-                    <input
-                      type="text"
-                      value={trackingData.location}
-                      onChange={(e) => setTrackingData(prev => ({...prev, location: e.target.value}))}
-                      placeholder="e.g., Sydney Warehouse, Melbourne Distribution Center"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                      required
-                    />
-                  </div>
+                 <div>
+                   <Label htmlFor="location">Location *</Label>
+                   <Input
+                     id="location"
+                     type="text"
+                     value={trackingData.location}
+                     onChange={(e) => setTrackingData(prev => ({...prev, location: e.target.value}))}
+                     placeholder="e.g., Sydney Warehouse, Melbourne Distribution Center"
+                     required
+                   />
+                 </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Timestamp *
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={trackingData.timestamp}
-                      onChange={(e) => setTrackingData(prev => ({...prev, timestamp: e.target.value}))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                      required
-                    />
-                  </div>
+                 <div>
+                   <Label htmlFor="timestamp">Timestamp *</Label>
+                   <Input
+                     id="timestamp"
+                     type="datetime-local"
+                     value={trackingData.timestamp}
+                     onChange={(e) => setTrackingData(prev => ({...prev, timestamp: e.target.value}))}
+                     required
+                   />
+                 </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Note (Optional)
-                    </label>
-                    <textarea
-                      value={trackingData.note}
-                      onChange={(e) => setTrackingData(prev => ({...prev, note: e.target.value}))}
-                      placeholder="Additional tracking information..."
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                    />
-                  </div>
+                 <div>
+                   <Label htmlFor="note">Note (Optional)</Label>
+                   <Textarea
+                     id="note"
+                     value={trackingData.note}
+                     onChange={(e) => setTrackingData(prev => ({...prev, note: e.target.value}))}
+                     placeholder="Additional tracking information..."
+                     rows={3}
+                   />
+                 </div>
 
-                  <div className="flex gap-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={closeTrackingModal}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submittingTracking}
-                      className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {submittingTracking ? (
-                        <>
-                          <Loader className="w-4 h-4 animate-spin" />
-                          Adding...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-4 h-4" />
-                          Add Tracking
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
+                 <div className="flex gap-3 pt-4">
+                   <Button
+                     type="button"
+                     variant="outline"
+                     onClick={closeTrackingModal}
+                     className="flex-1"
+                   >
+                     Cancel
+                   </Button>
+                   <Button
+                     type="submit"
+                     disabled={submittingTracking}
+                     className="flex-1"
+                   >
+                     {submittingTracking ? (
+                       <>
+                         <Loader className="w-4 h-4 mr-2 animate-spin" />
+                         Adding...
+                       </>
+                     ) : (
+                       <>
+                         <Save className="w-4 h-4 mr-2" />
+                         Add Tracking
+                       </>
+                     )}
+                   </Button>
+                 </div>
+               </form>
 
-                {/* Show existing tracking points */}
-                {selectedOrderForTracking.trackingPoints && selectedOrderForTracking.trackingPoints.length > 0 && (
-                  <div className="mt-6 pt-4 border-t border-gray-200">
-                    <h3 className="text-sm font-medium text-gray-900 mb-3">Recent Tracking History</h3>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {selectedOrderForTracking.trackingPoints.slice(-3).reverse().map((point, index) => (
-                        <div key={index} className="text-xs bg-gray-50 p-2 rounded">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium capitalize">{point.status}</span>
-                            <span className="text-gray-500">•</span>
-                            <span className="text-gray-600">{point.location}</span>
-                          </div>
-                          <div className="text-gray-500 mt-1">
-                            {formatDate(point.timestamp?.toDate ? point.timestamp.toDate() : point.timestamp)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+               {/* Show existing tracking points */}
+               {selectedOrderForTracking.trackingPoints && selectedOrderForTracking.trackingPoints.length > 0 && (
+                 <div className="pt-4 border-t border-gray-200">
+                   <h3 className="text-sm font-medium text-gray-900 mb-3">Recent Tracking History</h3>
+                   <div className="space-y-2 max-h-40 overflow-y-auto">
+                     {selectedOrderForTracking.trackingPoints.slice(-3).reverse().map((point, index) => (
+                       <div key={index} className="text-xs bg-gray-50 p-2 rounded">
+                         <div className="flex items-center gap-2">
+                           <Badge variant="outline" className="text-xs capitalize">{point.status}</Badge>
+                           <span className="text-gray-600">{point.location}</span>
+                         </div>
+                         <div className="text-gray-500 mt-1">
+                           {formatDate(point.timestamp?.toDate ? point.timestamp.toDate() : point.timestamp)}
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               )}
+             </div>
+           )}
+         </DialogContent>
+       </Dialog>
+     </div>
+   </div>
+ );
 };
 
 export default InvoiceManagement;

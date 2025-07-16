@@ -1,12 +1,14 @@
-import React from 'react'
-import DocumentScanner from '@/app/(components)/DocumentScanner'
+'use client'
+
 
 type Props = {}
 
 const page = (props: Props) => {
   return (
     <div>
-        <DocumentScanner />
+      
+      
+     
     </div>
   )
 }

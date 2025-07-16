@@ -30,27 +30,29 @@ import {
 } from 'lucide-react';
 import { collection, addDoc, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import ProductLookoutComponent from '../(components)/ProductLookoutComponent';
 
 import { db, storage } from '@/firebase';
 
 const AddOrderComponent = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState(1); // 1: Order Details, 2: Document Upload, 3: Success
+  const [step, setStep] = useState(1); // 1: Order Details, 2: Document Upload, 3: Product Check, 4: Success
   const [companyData, setCompanyData] = useState(null);
   
   // User email input state
   const [userEmail, setUserEmail] = useState('');
   const [newAuthorizedEmail, setNewAuthorizedEmail] = useState('');
-  const [showProductLookup, setShowProductLookup] = useState(false);
   const [proformaInvoiceFile, setProformaInvoiceFile] = useState(null);
-
 
   // File upload states
   const [purchaseOrderFile, setPurchaseOrderFile] = useState(null);
   const [salesContractFile, setSalesContractFile] = useState(null);
-const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, proforma: 0 });
+  const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, proforma: 0 });
+
+  // Product check states
+  const [missingProducts, setMissingProducts] = useState([]);
+  const [productsToAdd, setProductsToAdd] = useState([]);
+  const [addingProducts, setAddingProducts] = useState(false);
 
   // Signature form state
   const [signatureForm, setSignatureForm] = useState({
@@ -59,14 +61,6 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
     signatureDate: new Date().toISOString().split('T')[0]
   });
 
-
-  const handleProductFromLookup = (selectedProductData) => {
-  // Update current product with selected data
-  updateProduct(currentProductIndex, 'itemCode', selectedProductData.itemCode);
-  updateProduct(currentProductIndex, 'productName', selectedProductData.productName);
-  // ... update all other fields
-  setShowProductLookup(false);
-};
   // Multi-product state
   const [products, setProducts] = useState([{
     id: Date.now(),
@@ -247,25 +241,40 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
     'Chrome Plated'
   ];
 
+  const [emailLookupLoading, setEmailLookupLoading] = useState(false);
+  const [debouncedEmail, setDebouncedEmail] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedEmail(userEmail);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [userEmail]);
+
   // Load company data when modal opens or user email changes
   useEffect(() => {
-    if (isOpen && userEmail) {
+    if (isOpen && debouncedEmail && debouncedEmail.includes('@')) {
       loadCompanyData();
     }
-  }, [isOpen, userEmail]);
+  }, [isOpen, debouncedEmail]);
 
   // Load user's company data from companies collection
   const loadCompanyData = async () => {
-    if (!userEmail) return;
+    if (!debouncedEmail) return;
     
     try {
+      console.log('=== LOADING COMPANY DATA ===');
+      console.log('Searching for email:', debouncedEmail);
+      
       // First check if user is in authorizedUsers array
       const companiesQuery = query(
         collection(db, 'companies'),
-        where('authorizedUsers', 'array-contains', userEmail)
+        where('authorizedUsers', 'array-contains', debouncedEmail)
       );
       
       const companiesSnapshot = await getDocs(companiesQuery);
+      console.log('Companies found in authorizedUsers:', companiesSnapshot.size);
       
       if (!companiesSnapshot.empty) {
         const companyDoc = companiesSnapshot.docs[0];
@@ -273,12 +282,13 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
           id: companyDoc.id,
           ...companyDoc.data()
         };
+        
+        console.log('Company found via authorizedUsers:', company);
         setCompanyData(company);
         
         // Pre-fill form with company data
         setOrderForm(prev => ({
           ...prev,
-          
           customerInfo: {
             ...prev.customerInfo,
             companyName: company.companyName || '',
@@ -298,13 +308,16 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
           signerTitle: 'Authorized Representative'
         }));
       } else {
+        console.log('No company found in authorizedUsers, checking superAdmin...');
+        
         // Fallback: Check if user is superAdmin
         const ownerQuery = query(
           collection(db, 'companies'),
-          where('superAdmin', '==', userEmail)
+          where('superAdmin', '==', debouncedEmail)
         );
         
         const ownerSnapshot = await getDocs(ownerQuery);
+        console.log('Companies found via superAdmin:', ownerSnapshot.size);
         
         if (!ownerSnapshot.empty) {
           const companyDoc = ownerSnapshot.docs[0];
@@ -312,6 +325,8 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
             id: companyDoc.id,
             ...companyDoc.data()
           };
+          
+          console.log('Company found via superAdmin:', company);
           setCompanyData(company);
           
           // Pre-fill form with company data
@@ -336,12 +351,107 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
             signerTitle: 'Authorized Representative'
           }));
         } else {
-          // Reset company data if no company found
-          setCompanyData(null);
+          console.log('NO COMPANY FOUND FOR USER:', debouncedEmail);
+          // Only reset company data if we have a complete email
+          if (debouncedEmail.includes('@') && debouncedEmail.includes('.')) {
+            setCompanyData(null);
+          }
         }
       }
     } catch (error) {
       console.error('Error loading company data:', error);
+    }
+  };
+
+  // Check if products exist in database
+  const checkProductsInDatabase = async () => {
+    console.log('=== CHECKING PRODUCTS IN DATABASE ===');
+    const missing = [];
+    
+    for (const product of products) {
+      if (product.itemCode && product.itemCode.trim()) {
+        try {
+          const productsQuery = query(
+            collection(db, 'products'),
+            where('itemCode', '==', product.itemCode.trim().toUpperCase())
+          );
+          
+          const snapshot = await getDocs(productsQuery);
+          
+          if (snapshot.empty) {
+            console.log('Product not found in database:', product.itemCode);
+            missing.push(product);
+          } else {
+            console.log('Product found in database:', product.itemCode);
+          }
+        } catch (error) {
+          console.error('Error checking product:', product.itemCode, error);
+          // If there's an error checking, assume it's missing to be safe
+          missing.push(product);
+        }
+      }
+    }
+    
+    console.log('Missing products:', missing.length);
+    setMissingProducts(missing);
+    setProductsToAdd(missing); // Initially, all missing products are selected to add
+    
+    return missing;
+  };
+
+  // Add missing products to database
+  const addMissingProductsToDatabase = async () => {
+    if (productsToAdd.length === 0) return;
+    
+    setAddingProducts(true);
+    try {
+      console.log('Adding products to database:', productsToAdd.length);
+      
+      for (const product of productsToAdd) {
+        const productData = {
+          itemCode: product.itemCode.trim().toUpperCase(),
+          productName: product.productName.trim(),
+          description: product.description.trim(),
+          category: product.category,
+          dimensions: {
+            length: product.dimensions.length ? parseFloat(product.dimensions.length) : null,
+            width: product.dimensions.width ? parseFloat(product.dimensions.width) : null,
+            height: product.dimensions.height ? parseFloat(product.dimensions.height) : null,
+            diameter: product.dimensions.diameter ? parseFloat(product.dimensions.diameter) : null,
+            thickness: product.dimensions.thickness ? parseFloat(product.dimensions.thickness) : null,
+            unit: product.dimensions.unit
+          },
+          material: product.material,
+          finish: product.finish,
+          weight: product.weight ? parseFloat(product.weight) : null,
+          pricing: {
+            unitPrice: parseFloat(product.unitPrice),
+            currency: product.currency,
+            pricePerUnit: product.pricePerUnit
+          },
+          stock: {
+            quantity: 0, // Start with 0 stock for new products
+            minStock: 0,
+            location: ''
+          },
+          specifications: product.specifications || [],
+          tags: product.tags || [],
+          isActive: true,
+          isACRSCertified: product.isACRSCertified || false,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+
+        await addDoc(collection(db, 'products'), productData);
+        console.log('Added product to database:', product.itemCode);
+      }
+      
+      console.log('All selected products added to database');
+    } catch (error) {
+      console.error('Error adding products to database:', error);
+      throw error;
+    } finally {
+      setAddingProducts(false);
     }
   };
 
@@ -350,8 +460,10 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
     setStep(1);
     setPurchaseOrderFile(null);
     setSalesContractFile(null);
-     setProformaInvoiceFile(null); // Add this line
-  setUploadProgress({ po: 0, contract: 0, proforma: 0 }); // Update t
+    setProformaInvoiceFile(null);
+    setUploadProgress({ po: 0, contract: 0, proforma: 0 });
+    setMissingProducts([]);
+    setProductsToAdd([]);
 
     setUserEmail('');
     setCompanyData(null);
@@ -393,7 +505,7 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
     setCurrentProductIndex(0);
 
     setOrderForm({
-        poNumber: '',
+      poNumber: '',
       customerInfo: {
         companyName: '',
         contactPerson: '',
@@ -440,7 +552,7 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
 
   // Close modal
   const closeModal = () => {
-    if (!loading) {
+    if (!loading && !addingProducts) {
       setIsOpen(false);
       setTimeout(resetForm, 300);
     }
@@ -468,11 +580,6 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
     };
   };
 
-  // Generate PO number
-  const generatePONumber = () => {
-    return `PO-${Date.now()}`;
-  };
-
   // Generate sales contract number
   const generateSalesContractNumber = () => {
     return `SC${Math.floor(10000 + Math.random() * 90000)}`;
@@ -480,14 +587,15 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
 
   // Handle file selection
   const handleFileSelect = (file, type) => {
-  if (type === 'po') {
-    setPurchaseOrderFile(file);
-  } else if (type === 'contract') {
-    setSalesContractFile(file);
-  } else if (type === 'proforma') {
-    setProformaInvoiceFile(file);
-  }
-};
+    if (type === 'po') {
+      setPurchaseOrderFile(file);
+    } else if (type === 'contract') {
+      setSalesContractFile(file);
+    } else if (type === 'proforma') {
+      setProformaInvoiceFile(file);
+    }
+  };
+
   // Upload file to Firebase Storage
   const uploadFile = async (file, folder, fileName) => {
     try {
@@ -643,15 +751,14 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
   // Handle form submission
   const handleSubmit = async () => {
     // Check if all products have required fields
-     const hasValidProducts = products.every(product => 
-    product.itemCode && product.productName && product.unitPrice && product.quantity
-  );
+    const hasValidProducts = products.every(product => 
+      product.itemCode && product.productName && product.unitPrice && product.quantity
+    );
 
-  // Add PO Number validation
-  if (!userEmail || !hasValidProducts || !orderForm.customerInfo.companyName || !orderForm.poNumber) {
-    alert('Please fill in all required fields including PO Number for all products and your email');
-    return;
-  }
+    if (!userEmail || !hasValidProducts || !orderForm.customerInfo.companyName || !orderForm.poNumber) {
+      alert('Please fill in all required fields including PO Number for all products and your email');
+      return;
+    }
 
     // Validate signature fields if sales contract is uploaded
     if (salesContractFile && (!signatureForm.signerName || !signatureForm.signatureDate)) {
@@ -661,8 +768,12 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
 
     setLoading(true);
     try {
+      console.log('=== DEBUG COMPANY DATA ===');
+      console.log('userEmail:', userEmail);
+      console.log('companyData:', companyData);
+      
       const totals = calculateTotals();
-    const poNumber = orderForm.poNumber;
+      const poNumber = orderForm.poNumber;
       const salesContractNumber = generateSalesContractNumber();
       const currentDate = new Date();
       const signatureDateTime = new Date(signatureForm.signatureDate);
@@ -679,12 +790,12 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
       // Step 1: Upload files if provided
       let pdfUpload = null;
       let contractUpload = null;
+      let proformaUpload = null;
 
       if (purchaseOrderFile) {
         console.log('Uploading purchase order...');
         setUploadProgress(prev => ({ ...prev, po: 25 }));
         
-        // Purchase order file name format: PO-{timestamp}_{ISO-date}.{extension}
         const poFileName = `${poNumber}_${new Date().toISOString().replace(/[:.]/g, '-')}.${purchaseOrderFile.name.split('.').pop()}`;
         pdfUpload = await uploadFile(purchaseOrderFile, 'purchase-orders', poFileName);
         
@@ -695,7 +806,6 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
         console.log('Uploading signed sales contract...');
         setUploadProgress(prev => ({ ...prev, contract: 25 }));
         
-        // Signed contract file name format: PO-{timestamp}_signed_contract_{ISO-date}.{extension}
         const contractFileName = `${poNumber}_signed_contract_${new Date().toISOString().replace(/[:.]/g, '-')}.${salesContractFile.name.split('.').pop()}`;
         contractUpload = await uploadFile(salesContractFile, 'signed-contracts', contractFileName);
         
@@ -703,17 +813,39 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
       }
 
       if (proformaInvoiceFile) {
-      console.log('Uploading proforma invoice...');
-      setUploadProgress(prev => ({ ...prev, proforma: 25 }));
-      
-      // Proforma invoice file name format: PO-{timestamp}_proforma_invoice_{ISO-date}.{extension}
-      const proformaFileName = `${poNumber}_proforma_invoice_${new Date().toISOString().replace(/[:.]/g, '-')}.${proformaInvoiceFile.name.split('.').pop()}`;
-      proformaUpload = await uploadFile(proformaInvoiceFile, 'proforma-invoices', proformaFileName);
-      
-      setUploadProgress(prev => ({ ...prev, proforma: 100 }));
-    }
+        console.log('Uploading proforma invoice...');
+        setUploadProgress(prev => ({ ...prev, proforma: 25 }));
+        
+        const proformaFileName = `${poNumber}_proforma_invoice_${new Date().toISOString().replace(/[:.]/g, '-')}.${proformaInvoiceFile.name.split('.').pop()}`;
+        proformaUpload = await uploadFile(proformaInvoiceFile, 'proforma-invoices', proformaFileName);
+        
+        setUploadProgress(prev => ({ ...prev, proforma: 100 }));
+      }
 
-      // Step 2: Prepare complete order data with uploaded file URLs
+      // Step 2: Check if products exist in database
+      setStep(3); // Move to product check step
+      const missingProducts = await checkProductsInDatabase();
+
+      // If there are missing products, show the product check step
+      if (missingProducts.length > 0) {
+        setLoading(false); // Stop loading to allow user interaction
+        return; // Don't proceed to order creation yet
+      }
+
+      // If no missing products, proceed directly to order creation
+      await createOrder(pdfUpload, contractUpload, proformaUpload, totals, poNumber, salesContractNumber, currentDate, signatureDateTime, deliveryAddress, fullDeliveryAddress);
+
+    } catch (error) {
+      console.error('Error creating order:', error);
+      alert('Error creating order. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  // Create the order (separated from handleSubmit for reuse)
+  const createOrder = async (pdfUpload, contractUpload, proformaUpload, totals, poNumber, salesContractNumber, currentDate, signatureDateTime, deliveryAddress, fullDeliveryAddress) => {
+    try {
+      // Prepare complete order data with uploaded file URLs
       const orderData = {
         // Basic order info
         poNumber,
@@ -784,1597 +916,1785 @@ const [uploadProgress, setUploadProgress] = useState({ po: 0, contract: 0, profo
           specifications: product.specifications,
           tags: product.tags,
           isACRSCertified: product.isACRSCertified,
-          quantity: parseInt(product.quantity),
-          pricePerTonne: 0,
-          pricePerUnit: product.pricePerUnit,
-          unitPrice: parseFloat(product.unitPrice),
-          currency: product.currency,
-          totalWeight: parseInt(product.quantity),
-          imageUrl: null
-        })),
-        
-        // Financial details
-        subtotal: totals.subtotal,
-        gst: totals.gst,
-        totalAmount: totals.total,
-        
-        // Terms and conditions
-        paymentTerms: orderForm.paymentTerms,
-        deliveryTerms: orderForm.deliveryTerms,
-        documentation: orderForm.documentation,
-        packing: orderForm.packing,
-        invoicingBasis: orderForm.invoicingBasis,
-        quantityTolerance: orderForm.quantityTolerance,
-        
-        // Additional info
-        reference: orderForm.reference,
-        notes: orderForm.notes,
-        authorizedEmails: orderForm.authorizedEmails,
-        
-        // Contract status - set based on sales contract upload
-        contractStatus: salesContractFile ? 'signed' : 'unsigned',
-        
-        // Document URLs - include uploaded file data
-        pdfUrl: pdfUpload?.url || null,
-        pdfPath: pdfUpload?.path || null,
-        pdfUploadedAt: pdfUpload ? currentDate : null,
-        contractUrl: contractUpload?.url || null,
-        contractPath: contractUpload?.path || null,
-        contractUploadedAt: contractUpload ? currentDate : null,
-        originalContractUrl: contractUpload?.url || null,
-        signedContractUrl: contractUpload?.url || null,
-        signedContractPath: contractUpload?.path || null,
-        signedAt: contractUpload ? currentDate : null,
-        proformaInvoiceUrl: proformaUpload?.url || null,
-      proformaInvoicePath: proformaUpload?.path || null,
-      proformaInvoiceUploadedAt: proformaUpload ? currentDate : null,
-        
-        // Signature data - populate if sales contract uploaded
-        signature: salesContractFile ? {
-          contractSigned: true,
-          signatureDate: signatureDateTime,
-          signedAt: currentDate,
-          signerName: signatureForm.signerName,
-          signerTitle: signatureForm.signerTitle,
-          imageUrl: null,
-          imagePath: null
-        } : {
-          contractSigned: false,
-          signatureDate: null,
-          signedAt: null,
-          signerName: '',
-          signerTitle: '',
-          imageUrl: null,
-          imagePath: null
-        }
-      };
+         quantity: parseInt(product.quantity),
+         pricePerTonne: 0,
+         pricePerUnit: product.pricePerUnit,
+         unitPrice: parseFloat(product.unitPrice),
+         currency: product.currency,
+         totalWeight: parseInt(product.quantity),
+         imageUrl: null
+       })),
+       
+       // Financial details
+       subtotal: totals.subtotal,
+       gst: totals.gst,
+       totalAmount: totals.total,
+       
+       // Terms and conditions
+       paymentTerms: orderForm.paymentTerms,
+       deliveryTerms: orderForm.deliveryTerms,
+       documentation: orderForm.documentation,
+       packing: orderForm.packing,
+       invoicingBasis: orderForm.invoicingBasis,
+       quantityTolerance: orderForm.quantityTolerance,
+       
+       // Additional info
+       reference: orderForm.reference,
+       notes: orderForm.notes,
+       authorizedEmails: orderForm.authorizedEmails,
+       
+       // Contract status - set based on sales contract upload
+       contractStatus: salesContractFile ? 'signed' : 'unsigned',
+       
+       // Document URLs - include uploaded file data
+       pdfUrl: pdfUpload?.url || null,
+       pdfPath: pdfUpload?.path || null,
+       pdfUploadedAt: pdfUpload ? currentDate : null,
+       contractUrl: contractUpload?.url || null,
+       contractPath: contractUpload?.path || null,
+       contractUploadedAt: contractUpload ? currentDate : null,
+       originalContractUrl: contractUpload?.url || null,
+       signedContractUrl: contractUpload?.url || null,
+       signedContractPath: contractUpload?.path || null,
+       signedAt: contractUpload ? currentDate : null,
+       
+       proformaInvoiceUrl: proformaUpload?.url || null,
+       proformaInvoicePath: proformaUpload?.path || null,
+       proformaInvoiceUploadedAt: proformaUpload ? currentDate : null,
+       
+       // Signature data - populate if sales contract uploaded
+       signature: salesContractFile ? {
+         contractSigned: true,
+         signatureDate: signatureDateTime,
+         signedAt: currentDate,
+         signerName: signatureForm.signerName,
+         signerTitle: signatureForm.signerTitle,
+         imageUrl: null,
+         imagePath: null
+       } : {
+         contractSigned: false,
+         signatureDate: null,
+         signedAt: null,
+         signerName: '',
+         signerTitle: '',
+         imageUrl: null,
+         imagePath: null
+       }
+     };
 
-      // Step 3: Create order in Firestore with all data including file URLs
-      console.log('Creating order in Firestore with complete data...');
-      const docRef = await addDoc(collection(db, 'orders'), orderData);
-      const orderId = docRef.id;
+     // Create order in Firestore with all data including file URLs
+     console.log('Creating order in Firestore with complete data...');
+     const docRef = await addDoc(collection(db, 'orders'), orderData);
+     const orderId = docRef.id;
 
-      setStep(3); // Move to success step
-      
-      console.log('Order created successfully:', orderId);
-      
-      // Auto-close after success
-      setTimeout(() => {
-        closeModal();
-      }, 2000);
-      
-    } catch (error) {
-      console.error('Error creating order:', error);
-      alert('Error creating order. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+     setStep(4); // Move to success step
+     
+     console.log('Order created successfully:', orderId);
+     
+     // Auto-close after success
+     setTimeout(() => {
+       closeModal();
+     }, 2000);
+     
+   } catch (error) {
+     console.error('Error creating order:', error);
+     alert('Error creating order. Please try again.');
+   } finally {
+     setLoading(false);
+   }
+ };
 
-  // Handle form input changes
-  const handleInputChange = (form, path, value, productIndex = null) => {
-    if (form === 'product' && productIndex !== null) {
-      updateProduct(productIndex, path, value);
-    } else if (form === 'signature') {
-      setSignatureForm(prev => {
-        if (path.includes('.')) {
-          const fields = path.split('.');
-          const newData = { ...prev };
-          let current = newData;
-          for (let i = 0; i < fields.length - 1; i++) {
-            current = current[fields[i]];
-          }
-          current[fields[fields.length - 1]] = value;
-          return newData;
-        } else {
-          return { ...prev, [path]: value };
-        }
-      });
-    } else {
-      setOrderForm(prev => {
-        if (path.includes('.')) {
-          const fields = path.split('.');
-          const newData = { ...prev };
-          let current = newData;
-          for (let i = 0; i < fields.length - 1; i++) {
-            current = current[fields[i]];
-          }
-          current[fields[fields.length - 1]] = value;
-          return newData;
-        } else {
-          return { ...prev, [path]: value };
-        }
-      });
-    }
-  };
+ // Handle product check completion
+ const handleProductCheckComplete = async () => {
+   setLoading(true);
+   try {
+     // Add selected products to database
+     if (productsToAdd.length > 0) {
+       await addMissingProductsToDatabase();
+     }
 
-  // Copy customer address to delivery address
-  const copyCustomerAddress = () => {
-    setOrderForm(prev => ({
-      ...prev,
-      deliveryAddress: { ...prev.customerInfo.address },
-      sameAsCustomer: true
-    }));
-  };
+     // Get the stored upload data and proceed with order creation
+     const totals = calculateTotals();
+     const poNumber = orderForm.poNumber;
+     const salesContractNumber = generateSalesContractNumber();
+     const currentDate = new Date();
+     const signatureDateTime = new Date(signatureForm.signatureDate);
+     
+     const deliveryAddress = orderForm.sameAsCustomer 
+       ? orderForm.customerInfo.address 
+       : orderForm.deliveryAddress;
+     
+     const fullDeliveryAddress = `${deliveryAddress.street}, ${deliveryAddress.city} ${deliveryAddress.state} ${deliveryAddress.postcode}`;
 
-  // File input component
-  const FileUpload = ({ label, file, onFileSelect, type, required = false, showSignatureFields = false }) => (
-    <div className="space-y-2">
-      <label className="block text-sm font-medium text-gray-700">
-        {label} {required && '*'}
-      </label>
-      <div className="relative">
-        <input
-          type="file"
-          accept=".pdf,.doc,.docx,.html"
-          onChange={(e) => onFileSelect(e.target.files[0], type)}
-          className="hidden"
-          id={`file-${type}`}
-        />
-        <label
-          htmlFor={`file-${type}`}
-          className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors"
-        >
-          <Upload className="w-5 h-5 text-gray-400" />
-          <span className="text-gray-600">
-            {file ? file.name : 'Choose file...'}
-          </span>
-        </label>
-      </div>
-      {file && (
-        <div className="flex items-center gap-2 text-sm text-green-600">
-          <File className="w-4 h-4" />
-          <span>{file.name} ({Math.round(file.size / 1024)} KB)</span>
-        </div>
-      )}
-      
-      {/* Signature fields for sales contract */}
-      {showSignatureFields && file && (
-        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <h5 className="font-medium text-yellow-800 mb-3 flex items-center gap-2">
-            <PenTool className="w-4 h-4" />
-            Contract Signature Details
-          </h5>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Signer Name *
-              </label>
-              <input
-                type="text"
-                value={signatureForm.signerName}
-                onChange={(e) => handleInputChange('signature', 'signerName', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
-                placeholder="Full name of person signing"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Signer Title
-              </label>
-              <input
-                type="text"
-                value={signatureForm.signerTitle}
-                onChange={(e) => handleInputChange('signature', 'signerTitle', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
-                placeholder="e.g. Authorized Representative"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Signature Date *
-              </label>
-              <input
-                type="date"
-                value={signatureForm.signatureDate}
-                onChange={(e) => handleInputChange('signature', 'signatureDate', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
-                required
-              />
-            </div>
-          </div>
-          <p className="text-xs text-yellow-700 mt-2">
-            This information will be recorded as the contract signature details
-          </p>
-        </div>
-      )}
-    </div>
-  );
+     // Create uploads objects (these would be stored from previous step in real implementation)
+     let pdfUpload = null;
+     let contractUpload = null;
+     let proformaUpload = null;
 
-  return (
-    <>
-      {/* Trigger Button */}
-      <button
-        onClick={openModal}
-        className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors shadow-lg"
-      >
-        <Plus className="w-5 h-5" />
-        Add New Order
-      </button>
+     if (purchaseOrderFile) {
+       const poFileName = `${poNumber}_${new Date().toISOString().replace(/[:.]/g, '-')}.${purchaseOrderFile.name.split('.').pop()}`;
+       pdfUpload = await uploadFile(purchaseOrderFile, 'purchase-orders', poFileName);
+     }
 
-      {/* Modal */}
-      {isOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-white rounded-xl max-w-6xl w-full my-8 max-h-[95vh] overflow-hidden flex flex-col shadow-2xl"
-          >
-            {/* Header */}
-            <div className="p-6 border-b border-gray-200 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center">
-                    <Plus className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-800">Create New Order</h2>
-                    <p className="text-sm text-gray-600">
-                      {step === 1 ? 'Order & Product Details' : step === 2 ? 'Uploading Documents...' : 'Complete'}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={closeModal}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  disabled={loading}
-                >
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
-              
-              {/* Progress indicator */}
-              <div className="mt-4 flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  step >= 1 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-                }`}>
-                  1
-                </div>
-                <div className={`h-1 w-16 ${step >= 2 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  step >= 2 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-                }`}>
-                  2
-                </div>
-                <div className={`h-1 w-16 ${step >= 3 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  step >= 3 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-                }`}>
-                  3
-                </div>
-              </div>
-            </div>
+     if (salesContractFile) {
+       const contractFileName = `${poNumber}_signed_contract_${new Date().toISOString().replace(/[:.]/g, '-')}.${salesContractFile.name.split('.').pop()}`;
+       contractUpload = await uploadFile(salesContractFile, 'signed-contracts', contractFileName);
+     }
 
-            {/* Content */}
-            <div className="p-6 overflow-y-auto flex-1">
-              {step === 1 && (
-                <div className="space-y-8">
-                  {/* User Email Input */}
-                  <div className="bg-yellow-50 rounded-lg p-6">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
-                      <Mail className="w-5 h-5 text-yellow-600" />
-                      User Information
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Your Email Address *
-                        </label>
-                        <input
-                          type="email"
-                          value={userEmail}
-                          onChange={(e) => setUserEmail(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                          placeholder="e.g. adam@psa.com.au"
-                          required
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          This email will be used to find your company data and create the order
-                        </p>
-                      </div>
+     if (proformaInvoiceFile) {
+       const proformaFileName = `${poNumber}_proforma_invoice_${new Date().toISOString().replace(/[:.]/g, '-')}.${proformaInvoiceFile.name.split('.').pop()}`;
+       proformaUpload = await uploadFile(proformaInvoiceFile, 'proforma-invoices', proformaFileName);
+     }
 
-                      {companyData && (
-                        <div className="bg-green-100 rounded-lg p-4">
-                          <h4 className="font-medium text-green-800 mb-2">Company Found!</h4>
-                          <p className="text-sm text-green-700">
-                            <strong>{companyData.companyName}</strong><br/>
-                            ABN: {companyData.abn}<br/>
-                            Contact: {companyData.contactPerson}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+     await createOrder(pdfUpload, contractUpload, proformaUpload, totals, poNumber, salesContractNumber, currentDate, signatureDateTime, deliveryAddress, fullDeliveryAddress);
 
-                  {/* Product Information - Multiple Products */}
-                  <div className="bg-blue-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                        <Package className="w-5 h-5 text-blue-600" />
-                        Product Information ({products.length} {products.length === 1 ? 'item' : 'items'})
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={addNewProduct}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Add Product
-                      </button>
-                    </div>
+   } catch (error) {
+     console.error('Error in product check completion:', error);
+     alert('Error completing order. Please try again.');
+     setLoading(false);
+   }
+ };
 
-                    {/* Product Tabs */}
-                    <div className="mb-6">
-                      <div className="flex flex-wrap gap-2 mb-4 border-b border-blue-200 pb-4">
-                          {products.map((product, index) => {
-        const isActive = currentProductIndex === index;
-        
-        return (
-          <div
-            key={product.id}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors relative ${
-              isActive
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-blue-600 border border-blue-200 hover:bg-blue-50'
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => setCurrentProductIndex(index)}
-              className="flex items-center gap-2 flex-1"
-            >
-              <Package className="w-4 h-4" />
-              <span className="font-medium">Item {index + 1}</span>
-              {product.productName && (
-                <span className="text-xs opacity-75 max-w-24 truncate">
-                  {product.productName}
-                </span>
-              )}
-            </button>
-            {products.length > 1 && (
-              <button
-                type="button"
-                onClick={() => removeProduct(index)}
-                className="ml-2 p-1 hover:bg-red-100 rounded-full text-red-600 transition-colors"
-                title="Remove this product"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-        );
-      })}
-                      </div>
+ // Toggle product to add selection
+ const toggleProductToAdd = (productId) => {
+   setProductsToAdd(prev => {
+     const exists = prev.find(p => p.id === productId);
+     if (exists) {
+       return prev.filter(p => p.id !== productId);
+     } else {
+       const productToAdd = missingProducts.find(p => p.id === productId);
+       return [...prev, productToAdd];
+     }
+   });
+ };
 
-                      {/* Product Summary Cards */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                        {products.map((product, index) => (
-                          <div
-                            key={product.id}
-                            className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                              currentProductIndex === index
-                                ? 'border-blue-500 bg-blue-50 shadow-md'
-                                : 'border-gray-200 bg-white hover:border-blue-300'
-                            }`}
-                            onClick={() => setCurrentProductIndex(index)}
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="font-medium text-sm">Item {index + 1}</span>
-                              <span className={`px-2 py-1 rounded-full text-xs ${
-                                product.itemCode && product.productName && product.unitPrice && product.quantity
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {product.itemCode && product.productName && product.unitPrice && product.quantity
-                                  ? 'Complete'
-                                  : 'Incomplete'
-                                }
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-600 space-y-1">
-                              <div><span className="font-medium">Code:</span> {product.itemCode || 'Not set'}</div>
-                              <div><span className="font-medium">Name:</span> {product.productName || 'Not set'}</div>
-                              <div><span className="font-medium">Qty:</span> {product.quantity || 0} {product.pricePerUnit}</div>
-                              <div><span className="font-medium">Price:</span> ${product.unitPrice || '0.00'} {product.currency}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+ // Handle form input changes
+ const handleInputChange = (form, path, value, productIndex = null) => {
+   if (form === 'product' && productIndex !== null) {
+     updateProduct(productIndex, path, value);
+   } else if (form === 'signature') {
+     setSignatureForm(prev => {
+       if (path.includes('.')) {
+         const fields = path.split('.');
+         const newData = { ...prev };
+         let current = newData;
+         for (let i = 0; i < fields.length - 1; i++) {
+           current = current[fields[i]];
+         }
+         current[fields[fields.length - 1]] = value;
+         return newData;
+       } else {
+         return { ...prev, [path]: value };
+       }
+     });
+   } else {
+     setOrderForm(prev => {
+       if (path.includes('.')) {
+         const fields = path.split('.');
+         const newData = { ...prev };
+         let current = newData;
+         for (let i = 0; i < fields.length - 1; i++) {
+           current = current[fields[i]];
+         }
+         current[fields[fields.length - 1]] = value;
+         return newData;
+       } else {
+         return { ...prev, [path]: value };
+       }
+     });
+   }
+ };
 
-                    {/* Current Product Form */}
-                    {products[currentProductIndex] && (
-                      <div className="border border-blue-200 rounded-lg p-6 bg-white">
-                        <div className="flex items-center justify-between mb-4">
-                          <h4 className="font-semibold text-gray-800">
-                            Editing Item {currentProductIndex + 1}
-                          </h4>
-                          {products.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeProduct(currentProductIndex)}
-                              className="flex items-center gap-2 px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            >
-                              <X className="w-4 h-4" />
-                              Remove Item
-                            </button>
-                          )}
-                        </div>
+ // Copy customer address to delivery address
+ const copyCustomerAddress = () => {
+   setOrderForm(prev => ({
+     ...prev,
+     deliveryAddress: { ...prev.customerInfo.address },
+     sameAsCustomer: true
+   }));
+ };
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Item Code *
-                            </label>
-                            <input
-                              type="text"
-                              value={products[currentProductIndex].itemCode}
-                              onChange={(e) => handleInputChange('product', 'itemCode', e.target.value, currentProductIndex)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              placeholder="e.g. FBSB321330"
-                              required
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Product Name *
-                            </label>
-                            <input
-                              type="text"
-                              value={products[currentProductIndex].productName}
-                              onChange={(e) => handleInputChange('product', 'productName', e.target.value, currentProductIndex)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              placeholder="e.g. Forge Bar Starter Bar 32mm x 1330mm"
-                              required
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Category *
-                            </label>
-                            <select
-                              value={products[currentProductIndex].category}
-                              onChange={(e) => handleInputChange('product', 'category', e.target.value, currentProductIndex)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              required
-                            >
-                              {categories.map(cat => (
-                                <option key={cat} value={cat}>{cat}</option>
-                              ))}
-                            </select>
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Material *
-                            </label>
-                            <select
-                              value={products[currentProductIndex].material}
-                              onChange={(e) => handleInputChange('product', 'material', e.target.value, currentProductIndex)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              required
-                            >
-                              {materials.map(mat => (
-                                <option key={mat} value={mat}>{mat}</option>
-                              ))}
-                            </select>
-                          </div>
-                          
-                          <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Description *
-                            </label>
-                            <textarea
-                              value={products[currentProductIndex].description}
-                              onChange={(e) => handleInputChange('product', 'description', e.target.value, currentProductIndex)}
-                              rows={3}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              placeholder="e.g. 32mm x 1330mm assembled with FBENDCAP32"
-                              required
-                            />
-                          </div>
-                        </div>
+ // File input component
+ const FileUpload = ({ label, file, onFileSelect, type, required = false, showSignatureFields = false }) => (
+   <div className="space-y-2">
+     <label className="block text-sm font-medium text-gray-700">
+       {label} {required && '*'}
+     </label>
+     <div className="relative">
+       <input
+         type="file"
+         accept=".pdf,.doc,.docx,.html"
+         onChange={(e) => onFileSelect(e.target.files[0], type)}
+         className="hidden"
+         id={`file-${type}`}
+       />
+       <label
+         htmlFor={`file-${type}`}
+         className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 transition-colors"
+       >
+         <Upload className="w-5 h-5 text-gray-400" />
+         <span className="text-gray-600">
+           {file ? file.name : 'Choose file...'}
+         </span>
+       </label>
+     </div>
+     {file && (
+       <div className="flex items-center gap-2 text-sm text-green-600">
+         <File className="w-4 h-4" />
+         <span>{file.name} ({Math.round(file.size / 1024)} KB)</span>
+       </div>
+     )}
+     
+     {/* Signature fields for sales contract */}
+     {showSignatureFields && file && (
+       <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+         <h5 className="font-medium text-yellow-800 mb-3 flex items-center gap-2">
+           <PenTool className="w-4 h-4" />
+           Contract Signature Details
+         </h5>
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+           <div>
+             <label className="block text-sm font-medium text-gray-700 mb-1">
+               Signer Name *
+             </label>
+             <input
+               type="text"
+               value={signatureForm.signerName}
+               onChange={(e) => handleInputChange('signature', 'signerName', e.target.value)}
+               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
+               placeholder="Full name of person signing"
+               required
+             />
+           </div>
+           <div>
+             <label className="block text-sm font-medium text-gray-700 mb-1">
+               Signer Title
+             </label>
+             <input
+               type="text"
+               value={signatureForm.signerTitle}
+               onChange={(e) => handleInputChange('signature', 'signerTitle', e.target.value)}
+               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
+               placeholder="e.g. Authorized Representative"
+             />
+           </div>
+           <div className="md:col-span-2">
+             <label className="block text-sm font-medium text-gray-700 mb-1">
+               Signature Date *
+             </label>
+             <input
+               type="date"
+               value={signatureForm.signatureDate}
+               onChange={(e) => handleInputChange('signature', 'signatureDate', e.target.value)}
+               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
+               required
+             />
+           </div>
+         </div>
+         <p className="text-xs text-yellow-700 mt-2">
+           This information will be recorded as the contract signature details
+         </p>
+       </div>
+     )}
+   </div>
+ );
 
-                        {/* Dimensions */}
-                        <div className="mb-6">
-                          <h5 className="font-medium text-gray-800 mb-3">Dimensions</h5>
-                          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Length
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].dimensions.length}
-                                onChange={(e) => handleInputChange('product', 'dimensions.length', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="1330"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Width
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].dimensions.width}
-                                onChange={(e) => handleInputChange('product', 'dimensions.width', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="50"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Height
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].dimensions.height}
-                                onChange={(e) => handleInputChange('product', 'dimensions.height', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="25"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Diameter
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].dimensions.diameter}
-                                onChange={(e) => handleInputChange('product', 'dimensions.diameter', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="32"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Thickness
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].dimensions.thickness}
-                                onChange={(e) => handleInputChange('product', 'dimensions.thickness', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="5"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Unit
-                              </label>
-                              <select
-                                value={products[currentProductIndex].dimensions.unit}
-                                onChange={(e) => handleInputChange('product', 'dimensions.unit', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              >
-                                <option value="mm">mm</option>
-                                <option value="cm">cm</option>
-                                <option value="m">m</option>
-                                <option value="in">in</option>
-                                <option value="ft">ft</option>
-                              </select>
-                            </div>
-                          </div>
-                        </div>
+ return (
+   <>
+     {/* Trigger Button */}
+     <button
+       onClick={openModal}
+       className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors shadow-lg"
+     >
+       <Plus className="w-5 h-5" />
+       Add New Order
+     </button>
 
-                        {/* Weight, Finish, ACRS */}
-                        <div className="mb-6">
-                          <h5 className="font-medium text-gray-800 mb-3">Product Details</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Weight (kg)
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].weight}
-                                onChange={(e) => handleInputChange('product', 'weight', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="2.5"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Finish
-                              </label>
-                              <select
-                                value={products[currentProductIndex].finish}
-                                onChange={(e) => handleInputChange('product', 'finish', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              >
-                                {finishes.map(finish => (
-                                  <option key={finish} value={finish}>{finish}</option>
-                                ))}
-                              </select>
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                ACRS Certified
-                              </label>
-                              <select
-                                value={products[currentProductIndex].isACRSCertified}
-                                onChange={(e) => handleInputChange('product', 'isACRSCertified', e.target.value === 'true', currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              >
-                                <option value={false}>No</option>
-                                <option value={true}>Yes</option>
-                              </select>
-                            </div>
-                          </div>
-                        </div>
+     {/* Modal */}
+     {isOpen && (
+       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+         <motion.div
+           initial={{ opacity: 0, scale: 0.95 }}
+           animate={{ opacity: 1, scale: 1 }}
+           exit={{ opacity: 0, scale: 0.95 }}
+           className="bg-white rounded-xl max-w-6xl w-full my-8 max-h-[95vh] overflow-hidden flex flex-col shadow-2xl"
+         >
+           {/* Header */}
+           <div className="p-6 border-b border-gray-200 flex-shrink-0">
+             <div className="flex items-center justify-between">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center">
+                   <Plus className="w-6 h-6 text-white" />
+                 </div>
+                 <div>
+                   <h2 className="text-xl font-bold text-gray-800">Create New Order</h2>
+                   <p className="text-sm text-gray-600">
+                     {step === 1 ? 'Order & Product Details' : 
+                      step === 2 ? 'Uploading Documents...' : 
+                      step === 3 ? 'Product Database Check' : 
+                      'Complete'}
+                   </p>
+                 </div>
+               </div>
+               <button
+                 onClick={closeModal}
+                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                 disabled={loading || addingProducts}
+               >
+                 <X className="w-5 h-5 text-gray-500" />
+               </button>
+             </div>
+             
+             {/* Progress indicator */}
+             <div className="mt-4 flex items-center gap-2">
+               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                 step >= 1 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
+               }`}>
+                 1
+               </div>
+               <div className={`h-1 w-12 ${step >= 2 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
+               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                 step >= 2 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
+               }`}>
+                 2
+               </div>
+               <div className={`h-1 w-12 ${step >= 3 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
+               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                 step >= 3 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
+               }`}>
+                 3
+               </div>
+               <div className={`h-1 w-12 ${step >= 4 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
+               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                 step >= 4 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
+               }`}>
+                 4
+               </div>
+             </div>
+           </div>
 
-                        {/* Quantity and Pricing */}
-                        <div className="mb-6">
-                          <h5 className="font-medium text-gray-800 mb-3">Quantity & Pricing</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Quantity *
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={products[currentProductIndex].quantity}
-                                onChange={(e) => handleInputChange('product', 'quantity', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                required
-                              />
-                            </div>
+           {/* Content */}
+           <div className="p-6 overflow-y-auto flex-1">
+             {step === 1 && (
+               <div className="space-y-8">
+                 {/* User Email Input */}
+                 <div className="bg-yellow-50 rounded-lg p-6">
+                   <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
+                     <Mail className="w-5 h-5 text-yellow-600" />
+                     User Information
+                   </h3>
+                   
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Your Email Address *
+                       </label>
+                       <input
+                         type="email"
+                         value={userEmail}
+                         onChange={(e) => setUserEmail(e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                         placeholder="e.g. adam@psa.com.au"
+                         required
+                       />
+                       <p className="text-xs text-gray-500 mt-1">
+                         This email will be used to find your company data and create the order
+                       </p>
+                     </div>
 
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Unit Price *
-                              </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={products[currentProductIndex].unitPrice}
-                                onChange={(e) => handleInputChange('product', 'unitPrice', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="14.92"
-                                required
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Price Per
-                              </label>
-                              <select
-                                value={products[currentProductIndex].pricePerUnit}
-                                onChange={(e) => handleInputChange('product', 'pricePerUnit', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              >
-                                <option value="each">Each</option>
-                                <option value="meter">Per Meter</option>
-                                <option value="kg">Per Kg</option>
-                                <option value="tonne">Per Tonne</option>
-                                <option value="sheet">Per Sheet</option>
-                                <option value="sqm">Per Square Meter</option>
-                              </select>
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Currency
-                              </label>
-                              <select
-                                value={products[currentProductIndex].currency}
-                                onChange={(e) => handleInputChange('product', 'currency', e.target.value, currentProductIndex)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              >
-                                <option value="AUD">AUD</option>
-                                <option value="USD">USD</option>
-                                <option value="MYR">MYR</option>
-                              </select>
-                            </div>
-                          </div>
+                     {companyData && (
+                       <div className="bg-green-100 rounded-lg p-4">
+                         <h4 className="font-medium text-green-800 mb-2">Company Found!</h4>
+                         <p className="text-sm text-green-700">
+                           <strong>{companyData.companyName}</strong><br/>
+                           ABN: {companyData.abn}<br/>
+                           Contact: {companyData.contactPerson}
+                         </p>
+                       </div>
+                     )}
+                   </div>
+                 </div>
 
-                          {/* Product Total */}
-                          {products[currentProductIndex].unitPrice && products[currentProductIndex].quantity && (
-                            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                              <div className="flex justify-between items-center text-sm">
-                                <span className="font-medium text-gray-700">Item Total:</span>
-                                <span className="font-bold text-blue-800">
-                                  ${(parseFloat(products[currentProductIndex].unitPrice || 0) * parseInt(products[currentProductIndex].quantity || 0)).toFixed(2)} {products[currentProductIndex].currency}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                 {/* Product Information - Multiple Products */}
+                 <div className="bg-blue-50 rounded-lg p-6">
+                   <div className="flex items-center justify-between mb-4">
+                     <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                       <Package className="w-5 h-5 text-blue-600" />
+                       Product Information ({products.length} {products.length === 1 ? 'item' : 'items'})
+                     </h3>
+                     <button
+                       type="button"
+                       onClick={addNewProduct}
+                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                     >
+                       <Plus className="w-4 h-4" />
+                       Add Product
+                     </button>
+                   </div>
 
-                        {/* Specifications for current product */}
-                        <div className="mb-6">
-                          <h5 className="font-medium text-gray-800 mb-3">Technical Specifications</h5>
-                          
-                          {/* Add Specification */}
-                          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
-                            <div className="flex gap-3">
-                              <input
-                                type="text"
-                                value={newSpec.key}
-                                onChange={(e) => setNewSpec({...newSpec, key: e.target.value})}
-                                placeholder="Property (e.g. Tensile Strength)"
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              />
-                              <input
-                                type="text"
-                                value={newSpec.value}
-                                onChange={(e) => setNewSpec({...newSpec, value: e.target.value})}
-                                placeholder="Value (e.g. 400 MPa)"
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => addSpecification(currentProductIndex)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                              >
-                                Add
-                              </button>
-                            </div>
-                          </div>
+                   {/* Product Tabs */}
+                   <div className="mb-6">
+                     <div className="flex flex-wrap gap-2 mb-4 border-b border-blue-200 pb-4">
+                       {products.map((product, index) => {
+                         const isActive = currentProductIndex === index;
+                         
+                         return (
+                           <div
+                             key={product.id}
+                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors relative ${
+                               isActive
+                                 ? 'bg-blue-600 text-white'
+                                 : 'bg-white text-blue-600 border border-blue-200 hover:bg-blue-50'
+                             }`}
+                           >
+                             <button
+                               type="button"
+                               onClick={() => setCurrentProductIndex(index)}
+                               className="flex items-center gap-2 flex-1"
+                             >
+                               <Package className="w-4 h-4" />
+                               <span className="font-medium">Item {index + 1}</span>
+                               {product.productName && (
+                                 <span className="text-xs opacity-75 max-w-24 truncate">
+                                   {product.productName}
+                                 </span>
+                               )}
+                             </button>
+                             {products.length > 1 && (
+                               <button
+                                 type="button"
+                                 onClick={() => removeProduct(index)}
+                                 className="ml-2 p-1 hover:bg-red-100 rounded-full text-red-600 transition-colors"
+                                 title="Remove this product"
+                               >
+                                 <X className="w-3 h-3" />
+                               </button>
+                             )}
+                           </div>
+                         );
+                       })}
+                     </div>
 
-                          {/* Current Specifications */}
-                          <div className="space-y-2">
-                            {products[currentProductIndex].specifications.map((spec, index) => (
-                              <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                <div>
-                                  <span className="font-medium">{spec.key}:</span> {spec.value}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => removeSpecification(currentProductIndex, index)}
-                                  className="p-1 text-red-600 hover:bg-red-100 rounded"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                     {/* Product Summary Cards */}
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                       {products.map((product, index) => (
+                         <div
+                           key={product.id}
+                           className={`p-3 rounded-lg border transition-all cursor-pointer ${
+                             currentProductIndex === index
+                               ? 'border-blue-500 bg-blue-50 shadow-md'
+                               : 'border-gray-200 bg-white hover:border-blue-300'
+                           }`}
+                           onClick={() => setCurrentProductIndex(index)}
+                         >
+                           <div className="flex items-center justify-between mb-2">
+                             <span className="font-medium text-sm">Item {index + 1}</span>
+                             <span className={`px-2 py-1 rounded-full text-xs ${
+                               product.itemCode && product.productName && product.unitPrice && product.quantity
+                                 ? 'bg-green-100 text-green-800'
+                                 : 'bg-yellow-100 text-yellow-800'
+                             }`}>
+                               {product.itemCode && product.productName && product.unitPrice && product.quantity
+                                 ? 'Complete'
+                                 : 'Incomplete'
+                               }
+                             </span>
+                           </div>
+                           <div className="text-xs text-gray-600 space-y-1">
+                             <div><span className="font-medium">Code:</span> {product.itemCode || 'Not set'}</div>
+                             <div><span className="font-medium">Name:</span> {product.productName || 'Not set'}</div>
+                             <div><span className="font-medium">Qty:</span> {product.quantity || 0} {product.pricePerUnit}</div>
+                             <div><span className="font-medium">Price:</span> ${product.unitPrice || '0.00'} {product.currency}</div>
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
 
-                        {/* Tags for current product */}
-                        <div>
-                          <h5 className="font-medium text-gray-800 mb-3">Product Tags</h5>
-                          
-                          {/* Add Tag */}
-                          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
-                            <div className="flex gap-3">
-                              <input
-                                type="text"
-                                value={newTag}
-                                onChange={(e) => setNewTag(e.target.value)}
-                                placeholder="Enter tag (e.g. heavy-duty, outdoor)"
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => addTag(currentProductIndex)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                              >
-                                Add
-                              </button>
-                            </div>
-                          </div>
+                   {/* Current Product Form */}
+                   {products[currentProductIndex] && (
+                     <div className="border border-blue-200 rounded-lg p-6 bg-white">
+                       <div className="flex items-center justify-between mb-4">
+                         <h4 className="font-semibold text-gray-800">
+                           Editing Item {currentProductIndex + 1}
+                         </h4>
+                         {products.length > 1 && (
+                           <button
+                             type="button"
+                             onClick={() => removeProduct(currentProductIndex)}
+                             className="flex items-center gap-2 px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                           >
+                             <X className="w-4 h-4" />
+                             Remove Item
+                           </button>
+                         )}
+                       </div>
 
-                          {/* Current Tags */}
-                          <div className="flex flex-wrap gap-2">
-                            {products[currentProductIndex].tags.map((tag, index) => (
-                              <div key={index} className="flex items-center gap-1 bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
-                                <span>{tag}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeTag(currentProductIndex, index)}
-                                  className="ml-1 p-0.5 hover:bg-blue-200 rounded-full"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                         <div>
+                           <label className="block text-sm font-medium text-gray-700 mb-2">
+                             Item Code *
+                           </label>
+                           <input
+                             type="text"
+                             value={products[currentProductIndex].itemCode}
+                             onChange={(e) => handleInputChange('product', 'itemCode', e.target.value, currentProductIndex)}
+                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             placeholder="e.g. FBSB321330"
+                             required
+                           />
+                         </div>
+                         
+                         <div>
+                           <label className="block text-sm font-medium text-gray-700 mb-2">
+                             Product Name *
+                           </label>
+                           <input
+                             type="text"
+                             value={products[currentProductIndex].productName}
+                             onChange={(e) => handleInputChange('product', 'productName', e.target.value, currentProductIndex)}
+                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             placeholder="e.g. Forge Bar Starter Bar 32mm x 1330mm"
+                             required
+                           />
+                         </div>
+                         
+                         <div>
+                           <label className="block text-sm font-medium text-gray-700 mb-2">
+                             Category *
+                           </label>
+                           <select
+                             value={products[currentProductIndex].category}
+                             onChange={(e) => handleInputChange('product', 'category', e.target.value, currentProductIndex)}
+                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             required
+                           >
+                             {categories.map(cat => (
+                               <option key={cat} value={cat}>{cat}</option>
+                             ))}
+                           </select>
+                         </div>
+                         
+                         <div>
+                           <label className="block text-sm font-medium text-gray-700 mb-2">
+                             Material *
+                           </label>
+                           <select
+                             value={products[currentProductIndex].material}
+                             onChange={(e) => handleInputChange('product', 'material', e.target.value, currentProductIndex)}
+                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             required
+                           >
+                             {materials.map(mat => (
+                               <option key={mat} value={mat}>{mat}</option>
+                             ))}
+                           </select>
+                         </div>
+                         
+                         <div className="md:col-span-2">
+                           <label className="block text-sm font-medium text-gray-700 mb-2">
+                             Description *
+                           </label>
+                           <textarea
+                             value={products[currentProductIndex].description}
+                             onChange={(e) => handleInputChange('product', 'description', e.target.value, currentProductIndex)}
+                             rows={3}
+                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             placeholder="e.g. 32mm x 1330mm assembled with FBENDCAP32"
+                             required
+                           />
+                         </div>
+                       </div>
 
-                  {showProductLookup && (
-  <ProductLookoutComponent
-    isOpen={showProductLookup}
-    onClose={() => setShowProductLookup(false)}
-    onProductSelect={handleProductFromLookup}
-    currentProductData={products[currentProductIndex]}
-  />
-)}
+                       {/* Dimensions */}
+                       <div className="mb-6">
+                         <h5 className="font-medium text-gray-800 mb-3">Dimensions</h5>
+                         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Length
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].dimensions.length}
+                               onChange={(e) => handleInputChange('product', 'dimensions.length', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="1330"
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Width
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].dimensions.width}
+                               onChange={(e) => handleInputChange('product', 'dimensions.width', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="50"
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Height
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].dimensions.height}
+                               onChange={(e) => handleInputChange('product', 'dimensions.height', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="25"
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Diameter
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].dimensions.diameter}
+                               onChange={(e) => handleInputChange('product', 'dimensions.diameter', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="32"
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Thickness
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].dimensions.thickness}
+                               onChange={(e) => handleInputChange('product', 'dimensions.thickness', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="5"
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Unit
+                             </label>
+                             <select
+                               value={products[currentProductIndex].dimensions.unit}
+                               onChange={(e) => handleInputChange('product', 'dimensions.unit', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-transparent"
+                             >
+                               <option value="mm">mm</option>
+                               <option value="cm">cm</option>
+                               <option value="m">m</option>
+                               <option value="in">in</option>
+                               <option value="ft">ft</option>
+                             </select>
+                           </div>
+                         </div>
+                       </div>
 
-<button
-  onClick={() => setShowProductLookup(true)}
-  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
->
-  <Search className="w-4 h-4" />
-  Lookup
-</button>
+                       {/* Weight, Finish, ACRS */}
+                       <div className="mb-6">
+                         <h5 className="font-medium text-gray-800 mb-3">Product Details</h5>
+                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Weight (kg)
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].weight}
+                               onChange={(e) => handleInputChange('product', 'weight', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="2.5"
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Finish
+                             </label>
+                             <select
+                               value={products[currentProductIndex].finish}
+                               onChange={(e) => handleInputChange('product', 'finish', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             >
+                               {finishes.map(finish => (
+                                 <option key={finish} value={finish}>{finish}</option>
+                               ))}
+                             </select>
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               ACRS Certified
+                             </label>
+                             <select
+                               value={products[currentProductIndex].isACRSCertified}
+                               onChange={(e) => handleInputChange('product', 'isACRSCertified', e.target.value === 'true', currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             >
+                               <option value={false}>No</option>
+                               <option value={true}>Yes</option>
+                             </select>
+                           </div>
+                         </div>
+                       </div>
 
-                  {/* Customer Information */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                      <Building className="w-5 h-5" />
-                      Customer Information
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Company Name *
-                        </label>
-                        <input
-                          type="text"
-                          value={orderForm.customerInfo.companyName}
-                          onChange={(e) => handleInputChange('order', 'customerInfo.companyName', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          required
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Contact Person *
-                        </label>
-                        <input
-                          type="text"
-                          value={orderForm.customerInfo.contactPerson}
-                          onChange={(e) => handleInputChange('order', 'customerInfo.contactPerson', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          required
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Email *
-                        </label>
-                        <input
-                          type="email"
-                          value={orderForm.customerInfo.email}
-                          onChange={(e) => handleInputChange('order', 'customerInfo.email', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          required
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Phone *
-                        </label>
-                        <input
-                          type="tel"
-                          value={orderForm.customerInfo.phone}
-                          onChange={(e) => handleInputChange('order', 'customerInfo.phone', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          required
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          ABN
-                        </label>
-                        <input
-                          type="text"
-                          value={orderForm.customerInfo.abn}
-                          onChange={(e) => handleInputChange('order', 'customerInfo.abn', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        />
-                      </div>
-                    </div>
+                       {/* Quantity and Pricing */}
+                       <div className="mb-6">
+                         <h5 className="font-medium text-gray-800 mb-3">Quantity & Pricing</h5>
+                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Quantity *
+                             </label>
+                             <input
+                               type="number"
+                               min="1"
+                               value={products[currentProductIndex].quantity}
+                               onChange={(e) => handleInputChange('product', 'quantity', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               required
+                             />
+                           </div>
 
-                    {/* Customer Address */}
-                    <div className="space-y-4">
-                      <h4 className="font-medium text-gray-800">Customer Address</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Street Address *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.customerInfo.address.street}
-                            onChange={(e) => handleInputChange('order', 'customerInfo.address.street', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            City *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.customerInfo.address.city}
-                            onChange={(e) => handleInputChange('order', 'customerInfo.address.city', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            State *
-                          </label>
-                          <select
-                            value={orderForm.customerInfo.address.state}
-                            onChange={(e) => handleInputChange('order', 'customerInfo.address.state', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          >
-                            <option value="VIC">VIC</option>
-                            <option value="NSW">NSW</option>
-                            <option value="QLD">QLD</option>
-                            <option value="SA">SA</option>
-                            <option value="WA">WA</option>
-                            <option value="TAS">TAS</option>
-                            <option value="NT">NT</option>
-                            <option value="ACT">ACT</option>
-                          </select>
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Postcode *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.customerInfo.address.postcode}
-                            onChange={(e) => handleInputChange('order', 'customerInfo.address.postcode', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Country *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.customerInfo.address.country}
-                            onChange={(e) => handleInputChange('order', 'customerInfo.address.country', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Unit Price *
+                             </label>
+                             <input
+                               type="number"
+                               step="0.01"
+                               value={products[currentProductIndex].unitPrice}
+                               onChange={(e) => handleInputChange('product', 'unitPrice', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               placeholder="14.92"
+                               required
+                             />
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Price Per
+                             </label>
+                             <select
+                               value={products[currentProductIndex].pricePerUnit}
+                               onChange={(e) => handleInputChange('product', 'pricePerUnit', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             >
+                               <option value="each">Each</option>
+                               <option value="meter">Per Meter</option>
+                               <option value="kg">Per Kg</option>
+                               <option value="tonne">Per Tonne</option>
+                               <option value="sheet">Per Sheet</option>
+                               <option value="sqm">Per Square Meter</option>
+                             </select>
+                           </div>
+                           
+                           <div>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                               Currency
+                             </label>
+                             <select
+                               value={products[currentProductIndex].currency}
+                               onChange={(e) => handleInputChange('product', 'currency', e.target.value, currentProductIndex)}
+                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             >
+                               <option value="AUD">AUD</option>
+                               <option value="USD">USD</option>
+                               <option value="MYR">MYR</option>
+                             </select>
+                           </div>
+                         </div>
 
-                  {/* Delivery Address */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                        <MapPin className="w-5 h-5" />
-                        Delivery Address
-                      </h3>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={orderForm.sameAsCustomer}
-                          onChange={(e) => {
-                            handleInputChange('order', 'sameAsCustomer', e.target.checked);
-                            if (e.target.checked) {
-                              copyCustomerAddress();
-                            }
-                          }}
-                          className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-                        />
-                        <span className="text-sm text-gray-600">Same as customer address</span>
-                      </label>
-                    </div>
+                         {/* Product Total */}
+                         {products[currentProductIndex].unitPrice && products[currentProductIndex].quantity && (
+                           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                             <div className="flex justify-between items-center text-sm">
+                               <span className="font-medium text-gray-700">Item Total:</span>
+                               <span className="font-bold text-blue-800">
+                                 ${(parseFloat(products[currentProductIndex].unitPrice || 0) * parseInt(products[currentProductIndex].quantity || 0)).toFixed(2)} {products[currentProductIndex].currency}
+                               </span>
+                             </div>
+                           </div>
+                         )}
+                       </div>
 
-                    {!orderForm.sameAsCustomer && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Street Address *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.deliveryAddress.street}
-                            onChange={(e) => handleInputChange('order', 'deliveryAddress.street', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            City *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.deliveryAddress.city}
-                            onChange={(e) => handleInputChange('order', 'deliveryAddress.city', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            State *
-                          </label>
-                          <select
-                            value={orderForm.deliveryAddress.state}
-                            onChange={(e) => handleInputChange('order', 'deliveryAddress.state', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          >
-                            <option value="VIC">VIC</option>
-                            <option value="NSW">NSW</option>
-                            <option value="QLD">QLD</option>
-                            <option value="SA">SA</option>
-                            <option value="WA">WA</option>
-                            <option value="TAS">TAS</option>
-                            <option value="NT">NT</option>
-                            <option value="ACT">ACT</option>
-                          </select>
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Postcode *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.deliveryAddress.postcode}
-                            onChange={(e) => handleInputChange('order', 'deliveryAddress.postcode', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Country *
-                          </label>
-                          <input
-                            type="text"
-                            value={orderForm.deliveryAddress.country}
-                            onChange={(e) => handleInputChange('order', 'deliveryAddress.country', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            required
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                       {/* Specifications for current product */}
+                       <div className="mb-6">
+                         <h5 className="font-medium text-gray-800 mb-3">Technical Specifications</h5>
+                         
+                         {/* Add Specification */}
+                         <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+                           <div className="flex gap-3">
+                             <input
+                               type="text"
+                               value={newSpec.key}
+                               onChange={(e) => setNewSpec({...newSpec, key: e.target.value})}
+                               placeholder="Property (e.g. Tensile Strength)"
+                               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             />
+                             <input
+                               type="text"
+                               value={newSpec.value}
+                               onChange={(e) => setNewSpec({...newSpec, value: e.target.value})}
+                               placeholder="Value (e.g. 400 MPa)"
+                               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             />
+                             <button
+                               type="button"
+                               onClick={() => addSpecification(currentProductIndex)}
+                               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                             >
+                               Add
+                             </button>
+                           </div>
+                         </div>
 
-                  {/* Order Details */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                      <Calendar className="w-5 h-5" />
-                      Order Details
-                    </h3>
+                         {/* Current Specifications */}
+                         <div className="space-y-2">
+                           {products[currentProductIndex].specifications.map((spec, index) => (
+                             <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                               <div>
+                                 <span className="font-medium">{spec.key}:</span> {spec.value}
+                               </div>
+                               <button
+                                 type="button"
+                                 onClick={() => removeSpecification(currentProductIndex, index)}
+                                 className="p-1 text-red-600 hover:bg-red-100 rounded"
+                               >
+                                 <X className="w-4 h-4" />
+                               </button>
+                             </div>
+                           ))}
+                         </div>
+                       </div>
 
-                    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-2">
-        PO Number *
-      </label>
-      <input
-        type="text"
-        value={orderForm.poNumber}
-        onChange={(e) => handleInputChange('order', 'poNumber', e.target.value)}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-        placeholder="e.g. PO-2024-001"
-        required
-      />
-    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Order Date *
-                        </label>
-                        <input
-                          type="date"
-                          value={orderForm.orderDate}
-                          onChange={(e) => handleInputChange('order', 'orderDate', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          required
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Estimated Delivery
-                        </label>
-                        <input
-                          type="date"
-                          value={orderForm.estimatedDelivery}
-                          onChange={(e) => handleInputChange('order', 'estimatedDelivery', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Reference
-                        </label>
-                        <input
-                          type="text"
-                          value={orderForm.reference}
-                          onChange={(e) => handleInputChange('order', 'reference', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          placeholder="Purchase order reference"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Notes
-                      </label>
-                      <textarea
-                        value={orderForm.notes}
-                        onChange={(e) => handleInputChange('order', 'notes', e.target.value)}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        placeholder="Additional notes or special requirements"
-                      />
-                    </div>
-                  </div>
+                       {/* Tags for current product */}
+                       <div>
+                         <h5 className="font-medium text-gray-800 mb-3">Product Tags</h5>
+                         
+                         {/* Add Tag */}
+                         <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+                           <div className="flex gap-3">
+                             <input
+                               type="text"
+                               value={newTag}
+                               onChange={(e) => setNewTag(e.target.value)}
+                               placeholder="Enter tag (e.g. heavy-duty, outdoor)"
+                               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                             />
+                             <button
+                               type="button"
+                               onClick={() => addTag(currentProductIndex)}
+                               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                             >
+                               Add
+                             </button>
+                           </div>
+                         </div>
 
-                  {/* Terms and Conditions */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                      <FileText className="w-5 h-5" />
-                      Terms & Conditions
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Payment Terms
-                        </label>
-                        <select
-                          value={orderForm.paymentTerms}
-                          onChange={(e) => handleInputChange('order', 'paymentTerms', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        >
-                          <option value="30 Days from delivery to yard">30 Days from delivery to yard</option>
-                          <option value="14 Days from delivery">14 Days from delivery</option>
-                          <option value="Cash on delivery">Cash on delivery</option>
-                          <option value="Payment in advance">Payment in advance</option>
-                          <option value="Letter of credit">Letter of credit</option>
-                        </select>
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Delivery Terms
-                        </label>
-                        <select
-                          value={orderForm.deliveryTerms}
-                          onChange={(e) => handleInputChange('order', 'deliveryTerms', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        >
-                          <option value="Delivery Duty paid - unloading by purchaser">Delivery Duty paid - unloading by purchaser</option>
-                          <option value="Ex-works">Ex-works</option>
-                          <option value="Free on board">Free on board</option>
-                          <option value="Cost and freight">Cost and freight</option>
-                        </select>
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Invoicing Basis
-                        </label>
-                        <select
-                          value={orderForm.invoicingBasis}
-                          onChange={(e) => handleInputChange('order', 'invoicingBasis', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        >
-                          <option value="Theoretical Weight">Theoretical Weight</option>
-                          <option value="Actual Weight">Actual Weight</option>
-                          <option value="Per Unit">Per Unit</option>
-                        </select>
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Quantity Tolerance
-                        </label>
-                        <select
-                          value={orderForm.quantityTolerance}
-                          onChange={(e) => handleInputChange('order', 'quantityTolerance', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        >
-                          <option value="+/- 10%">+/- 10%</option>
-                          <option value="+/- 5%">+/- 5%</option>
-                          <option value="+/- 15%">+/- 15%</option>
-                          <option value="Exact quantity">Exact quantity</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
+                         {/* Current Tags */}
+                         <div className="flex flex-wrap gap-2">
+                           {products[currentProductIndex].tags.map((tag, index) => (
+                             <div key={index} className="flex items-center gap-1 bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
+                               <span>{tag}</span>
+                               <button
+                                 type="button"
+                                 onClick={() => removeTag(currentProductIndex, index)}
+                                 className="ml-1 p-0.5 hover:bg-blue-200 rounded-full"
+                               >
+                                 <X className="w-3 h-3" />
+                               </button>
+                             </div>
+                           ))}
+                         </div>
+                       </div>
+                     </div>
+                   )}
+                 </div>
 
-                  {/* Document Upload */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                      <FileText className="w-5 h-5" />
-                      Document Upload
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6"> {/* Changed from grid-cols-2 to grid-cols-3 */}
-    <FileUpload
-      label="Purchase Order Document"
-      file={purchaseOrderFile}
-      onFileSelect={handleFileSelect}
-      type="po"
-      showSignatureFields={false}
-    />
-    
-    <FileUpload
-      label="Signed Sales Contract Document"
-      file={salesContractFile}
-      onFileSelect={handleFileSelect}
-      type="contract"
-      showSignatureFields={true}
-    />
+                 {/* Customer Information */}
+                 <div className="space-y-4">
+                   <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                     <Building className="w-5 h-5" />
+                     Customer Information
+                   </h3>
+                   
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Company Name *
+                       </label>
+                       <input
+                         type="text"
+                         value={orderForm.customerInfo.companyName}
+                         onChange={(e) => handleInputChange('order', 'customerInfo.companyName', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                         required
+                       />
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Contact Person *
+                       </label>
+                       <input
+                         type="text"
+                         value={orderForm.customerInfo.contactPerson}
+                         onChange={(e) => handleInputChange('order', 'customerInfo.contactPerson', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                         required
+                       />
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Email *
+                       </label>
+                       <input
+                         type="email"
+                         value={orderForm.customerInfo.email}
+                         onChange={(e) => handleInputChange('order', 'customerInfo.email', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                         required
+                       />
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Phone *
+                       </label>
+                       <input
+                         type="tel"
+                         value={orderForm.customerInfo.phone}
+                         onChange={(e) => handleInputChange('order', 'customerInfo.phone', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                         required
+                       />
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         ABN
+                       </label>
+                       <input
+                         type="text"
+                         value={orderForm.customerInfo.abn}
+                         onChange={(e) => handleInputChange('order', 'customerInfo.abn', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       />
+                     </div>
+                   </div>
 
-    <FileUpload
-      label="Proforma Invoice Document"
-      file={proformaInvoiceFile}
-      onFileSelect={handleFileSelect}
-      type="proforma"
-      showSignatureFields={false}
-    />
-  </div>
-                    
+                   {/* Customer Address */}
+                   <div className="space-y-4">
+                     <h4 className="font-medium text-gray-800">Customer Address</h4>
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                       <div className="md:col-span-2">
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           Street Address *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.customerInfo.address.street}
+                           onChange={(e) => handleInputChange('order', 'customerInfo.address.street', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           City *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.customerInfo.address.city}
+                           onChange={(e) => handleInputChange('order', 'customerInfo.address.city', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           State *
+                         </label>
+                         <select
+                           value={orderForm.customerInfo.address.state}
+                           onChange={(e) => handleInputChange('order', 'customerInfo.address.state', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         >
+                           <option value="VIC">VIC</option>
+                           <option value="NSW">NSW</option>
+                           <option value="QLD">QLD</option>
+                           <option value="SA">SA</option>
+                           <option value="WA">WA</option>
+                           <option value="TAS">TAS</option>
+                           <option value="NT">NT</option>
+                           <option value="ACT">ACT</option>
+                         </select>
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           Postcode *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.customerInfo.address.postcode}
+                           onChange={(e) => handleInputChange('order', 'customerInfo.address.postcode', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           Country *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.customerInfo.address.country}
+                           onChange={(e) => handleInputChange('order', 'customerInfo.address.country', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+
+                 {/* Delivery Address */}
+                 <div className="space-y-4">
+                   <div className="flex items-center justify-between">
+                     <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                       <MapPin className="w-5 h-5" />
+                       Delivery Address
+                     </h3>
+                     <label className="flex items-center gap-2">
+                       <input
+                         type="checkbox"
+                         checked={orderForm.sameAsCustomer}
+                         onChange={(e) => {
+                           handleInputChange('order', 'sameAsCustomer', e.target.checked);
+                           if (e.target.checked) {
+                             copyCustomerAddress();
+                           }
+                         }}
+                         className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                       />
+                       <span className="text-sm text-gray-600">Same as customer address</span>
+                     </label>
+                   </div>
+
+                   {!orderForm.sameAsCustomer && (
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                       <div className="md:col-span-2">
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           Street Address *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.deliveryAddress.street}
+                           onChange={(e) => handleInputChange('order', 'deliveryAddress.street', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           City *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.deliveryAddress.city}
+                           onChange={(e) => handleInputChange('order', 'deliveryAddress.city', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           State *
+                         </label>
+                         <select
+                           value={orderForm.deliveryAddress.state}
+                           onChange={(e) => handleInputChange('order', 'deliveryAddress.state', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         >
+                           <option value="VIC">VIC</option>
+                           <option value="NSW">NSW</option>
+                           <option value="QLD">QLD</option>
+                           <option value="SA">SA</option>
+                           <option value="WA">WA</option>
+                           <option value="TAS">TAS</option>
+                           <option value="NT">NT</option>
+                           <option value="ACT">ACT</option>
+                         </select>
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           Postcode *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.deliveryAddress.postcode}
+                           onChange={(e) => handleInputChange('order', 'deliveryAddress.postcode', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                       
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-2">
+                           Country *
+                         </label>
+                         <input
+                           type="text"
+                           value={orderForm.deliveryAddress.country}
+                           onChange={(e) => handleInputChange('order', 'deliveryAddress.country', e.target.value)}
+                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                           required
+                         />
+                       </div>
+                     </div>
+                   )}
+                 </div>
+
+                 {/* Order Details */}
+                 <div className="space-y-4">
+                   <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                     <Calendar className="w-5 h-5" />
+                     Order Details
+                   </h3>
+
+                   <div>
+                     <label className="block text-sm font-medium text-gray-700 mb-2">
+                       PO Number *
+                     </label>
+                     <input
+                       type="text"
+                       value={orderForm.poNumber}
+                       onChange={(e) => handleInputChange('order', 'poNumber', e.target.value)}
+                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       placeholder="e.g. PO-2024-001"
+                       required
+                     />
+                   </div>
+                   
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Order Date *
+                       </label>
+                       <input
+                         type="date"
+                         value={orderForm.orderDate}
+                         onChange={(e) => handleInputChange('order', 'orderDate', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                         required
+                       />
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Estimated Delivery
+                       </label>
+                       <input
+                         type="date"
+                         value={orderForm.estimatedDelivery}
+                         onChange={(e) => handleInputChange('order', 'estimatedDelivery', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       />
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Reference
+                       </label>
+                       <input
+                         type="text"
+                         value={orderForm.reference}
+                         onChange={(e) => handleInputChange('order', 'reference', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                         placeholder="Purchase order reference"
+                       />
+                     </div>
+                   </div>
+                   
+                   <div>
+                     <label className="block text-sm font-medium text-gray-700 mb-2">
+                       Notes
+                     </label>
+                     <textarea
+                       value={orderForm.notes}
+                       onChange={(e) => handleInputChange('order', 'notes', e.target.value)}
+                       rows={3}
+                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       placeholder="Additional notes or special requirements"
+                     />
+                   </div>
+                 </div>
+
+                 {/* Terms and Conditions */}
+                 <div className="space-y-4">
+                   <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                     <FileText className="w-5 h-5" />
+                     Terms & Conditions
+                   </h3>
+                   
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Payment Terms
+                       </label>
+                       <select
+                         value={orderForm.paymentTerms}
+                         onChange={(e) => handleInputChange('order', 'paymentTerms', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       >
+                         <option value="30 Days from delivery to yard">30 Days from delivery to yard</option>
+                         <option value="14 Days from delivery">14 Days from delivery</option>
+                         <option value="Cash on delivery">Cash on delivery</option>
+                         <option value="Payment in advance">Payment in advance</option>
+                         <option value="Letter of credit">Letter of credit</option>
+                       </select>
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Delivery Terms
+                       </label>
+                       <select
+                         value={orderForm.deliveryTerms}
+                         onChange={(e) => handleInputChange('order', 'deliveryTerms', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       >
+                         <option value="Delivery Duty paid - unloading by purchaser">Delivery Duty paid - unloading by purchaser</option>
+                         <option value="Ex-works">Ex-works</option>
+                         <option value="Free on board">Free on board</option>
+                         <option value="Cost and freight">Cost and freight</option>
+                       </select>
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Invoicing Basis
+                       </label>
+                       <select
+                         value={orderForm.invoicingBasis}
+                         onChange={(e) => handleInputChange('order', 'invoicingBasis', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       >
+                         <option value="Theoretical Weight">Theoretical Weight</option>
+                         <option value="Actual Weight">Actual Weight</option>
+                         <option value="Per Unit">Per Unit</option>
+                       </select>
+                     </div>
+                     
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                         Quantity Tolerance
+                       </label>
+                       <select
+                         value={orderForm.quantityTolerance}
+                         onChange={(e) => handleInputChange('order', 'quantityTolerance', e.target.value)}
+                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                       >
+                         <option value="+/- 10%">+/- 10%</option>
+                         <option value="+/- 5%">+/- 5%</option>
+                         <option value="+/- 15%">+/- 15%</option>
+                         <option value="Exact quantity">Exact quantity</option>
+                       </select>
+                     </div>
+                   </div>
+                 </div>
+
+                 {/* Document Upload */}
+                 <div className="space-y-4">
+                   <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                     <FileText className="w-5 h-5" />
+                     Document Upload
+                   </h3>
+                   
+                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <FileUpload
+                       label="Purchase Order Document"
+                       file={purchaseOrderFile}
+                       onFileSelect={handleFileSelect}
+                       type="po"
+                       showSignatureFields={false}
+                     />
+                     
+                     <FileUpload
+                       label="Signed Sales Contract Document"
+                       file={salesContractFile}
+                       onFileSelect={handleFileSelect}
+                       type="contract"
+                       showSignatureFields={true}
+                     />
+
+                     <FileUpload
+                       label="Proforma Invoice Document"
+                       file={proformaInvoiceFile}
+                       onFileSelect={handleFileSelect}
+                       type="proforma"
+                       showSignatureFields={false}
+                     />
+                   </div>
+                   
                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-    <div className="flex items-start gap-2">
-      <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
-      <div className="text-sm text-blue-800">
-        <p className="font-medium mb-1">Document Upload Guidelines:</p>
-        <ul className="space-y-1 text-blue-700">
-          <li>• Purchase orders: PDF, DOC, DOCX, HTML → stored in /purchase-orders/</li>
-          <li>• Sales contracts: Upload SIGNED contracts → stored in /signed-contracts/</li>
-          <li>• Proforma invoices: PDF, DOC, DOCX, HTML → stored in /proforma-invoices/</li>
-          <li>• If uploading sales contract, signature details are required</li>
-          <li>• Contract status will be automatically set to "signed" when contract uploaded</li>
-          <li>• Maximum file size: 10MB per document</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
+                     <div className="flex items-start gap-2">
+                       <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                       <div className="text-sm text-blue-800">
+                         <p className="font-medium mb-1">Document Upload Guidelines:</p>
+                         <ul className="space-y-1 text-blue-700">
+                           <li>• Purchase orders: PDF, DOC, DOCX, HTML → stored in /purchase-orders/</li>
+                           <li>• Sales contracts: Upload SIGNED contracts → stored in /signed-contracts/</li>
+                           <li>• Proforma invoices: PDF, DOC, DOCX, HTML → stored in /proforma-invoices/</li>
+                           <li>• If uploading sales contract, signature details are required</li>
+                           <li>• Contract status will be automatically set to "signed" when contract uploaded</li>
+                           <li>• Maximum file size: 10MB per document</li>
+                         </ul>
+                       </div>
+                     </div>
+                   </div>
+                 </div>
 
-                  {/* Authorized Emails Section */}
-                  <div className="bg-indigo-50 rounded-lg p-6">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
-                      <Mail className="w-5 h-5 text-indigo-600" />
-                      Authorized Emails
-                    </h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Add email addresses of people who should have access to this order. These users will be able to view and manage this order.
-                    </p>
-                    
-                    {/* Add Authorized Email */}
-                    <div className="mb-4 p-4 bg-white rounded-lg border border-indigo-200">
-                      <div className="flex gap-3">
-                        <input
-                          type="email"
-                          value={newAuthorizedEmail}
-                          onChange={(e) => setNewAuthorizedEmail(e.target.value)}
-                          placeholder="Enter email address (e.g. user@company.com)"
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        />
-                        <button
-                          type="button"
-                          onClick={addAuthorizedEmail}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                        >
-                          Add Email
-                        </button>
-                      </div>
-                    </div>
+                 {/* Authorized Emails Section */}
+                 <div className="bg-indigo-50 rounded-lg p-6">
+                   <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
+                     <Mail className="w-5 h-5 text-indigo-600" />
+                     Authorized Emails
+                   </h3>
+                   <p className="text-sm text-gray-600 mb-4">
+                     Add email addresses of people who should have access to this order. These users will be able to view and manage this order.
+                   </p>
+                   
+                   {/* Add Authorized Email */}
+                   <div className="mb-4 p-4 bg-white rounded-lg border border-indigo-200">
+                     <div className="flex gap-3">
+                       <input
+                         type="email"
+                         value={newAuthorizedEmail}
+                         onChange={(e) => setNewAuthorizedEmail(e.target.value)}
+                         placeholder="Enter email address (e.g. user@company.com)"
+                         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                       />
+                       <button
+                         type="button"
+                         onClick={addAuthorizedEmail}
+                         className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                       >
+                         Add Email
+                       </button>
+                     </div>
+                   </div>
 
-                    {/* Current Authorized Emails */}
-                    <div>
-                      <h4 className="font-medium text-gray-800 mb-3">Authorized Users ({orderForm.authorizedEmails.length})</h4>
-                      <div className="space-y-2">
-                        {orderForm.authorizedEmails.length === 0 ? (
-                          <div className="text-center py-6 text-gray-500">
-                            <Mail className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                            <p>No authorized emails added yet</p>
-                            <p className="text-sm">Add email addresses above to grant order access</p>
-                          </div>
-                        ) : (
-                          orderForm.authorizedEmails.map((email, index) => (
-                            <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border border-indigo-200 hover:border-indigo-300 transition-colors">
-                              <div className="flex items-center gap-2">
-                                <Mail className="w-4 h-4 text-indigo-600" />
-                                <span className="font-medium text-gray-800">{email}</span>
-                                {email === userEmail && (
-                                  <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">
-                                    You
-                                  </span>
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeAuthorizedEmail(index)}
-                                className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
-                                title="Remove email"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
+                   {/* Current Authorized Emails */}
+                   <div>
+                     <h4 className="font-medium text-gray-800 mb-3">Authorized Users ({orderForm.authorizedEmails.length})</h4>
+                     <div className="space-y-2">
+                       {orderForm.authorizedEmails.length === 0 ? (
+                         <div className="text-center py-6 text-gray-500">
+                           <Mail className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                           <p>No authorized emails added yet</p>
+                           <p className="text-sm">Add email addresses above to grant order access</p>
+                         </div>
+                       ) : (
+                         orderForm.authorizedEmails.map((email, index) => (
+                           <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border border-indigo-200 hover:border-indigo-300 transition-colors">
+                             <div className="flex items-center gap-2">
+                               <Mail className="w-4 h-4 text-indigo-600" />
+                               <span className="font-medium text-gray-800">{email}</span>
+                               {email === userEmail && (
+                                 <span className="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs font-medium">
+                                   You
+                                 </span>
+                               )}
+                             </div>
+                             <button
+                               type="button"
+                               onClick={() => removeAuthorizedEmail(index)}
+                               className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
+                               title="Remove email"
+                             >
+                               <X className="w-4 h-4" />
+                             </button>
+                           </div>
+                         ))
+                       )}
+                     </div>
+                   </div>
 
-                    {/* Auto-populate from company */}
-                    {companyData && companyData.authorizedUsers && companyData.authorizedUsers.length > 0 && (
-                      <div className="mt-4 p-4 bg-indigo-100 rounded-lg">
-                        <div className="flex items-center justify-between mb-2">
-                          <h5 className="font-medium text-indigo-800">Company Team Members</h5>
-                          <button
-                            type="button"
-                            onClick={addAllCompanyEmails}
-                            className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 transition-colors"
-                          >
-                            Add All
-                          </button>
-                        </div>
-                        <div className="space-y-1">
-                          {companyData.authorizedUsers.map((email, index) => (
-                            <div key={index} className="flex items-center justify-between text-sm">
-                              <span className="text-indigo-700">{email}</span>
-                              {!orderForm.authorizedEmails.includes(email) && (
-                                <button
-                                  type="button"
-                                  onClick={() => addSingleCompanyEmail(email)}
-                                  className="text-indigo-600 hover:text-indigo-800 transition-colors"
-                                >
-                                  Add
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                   {/* Auto-populate from company */}
+                   {companyData && companyData.authorizedUsers && companyData.authorizedUsers.length > 0 && (
+                     <div className="mt-4 p-4 bg-indigo-100 rounded-lg">
+                       <div className="flex items-center justify-between mb-2">
+                         <h5 className="font-medium text-indigo-800">Company Team Members</h5>
+                         <button
+                           type="button"
+                           onClick={addAllCompanyEmails}
+                           className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 transition-colors"
+                         >
+                           Add All
+                         </button>
+                       </div>
+                       <div className="space-y-1">
+                         {companyData.authorizedUsers.map((email, index) => (
+                           <div key={index} className="flex items-center justify-between text-sm">
+                             <span className="text-indigo-700">{email}</span>
+                             {!orderForm.authorizedEmails.includes(email) && (
+                               <button
+                                 type="button"
+                                 onClick={() => addSingleCompanyEmail(email)}
+                                 className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                               >
+                                 Add
+                               </button>
+                             )}
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                   )}
+                 </div>
 
-                  {/* Order Summary */}
-                  {products.length > 0 && products.some(p => p.unitPrice && p.quantity) && (
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                        <Calculator className="w-5 h-5" />
-                        Order Summary
-                      </h3>
-                      
-                      <div className="bg-gray-50 rounded-lg p-6">
-                        <div className="space-y-4">
-                          {/* Products List */}
-                          <div className="space-y-3">
-                            {products.map((product, index) => (
-                              product.unitPrice && product.quantity && (
-                                <div key={product.id} className="flex justify-between items-center p-3 bg-white rounded-lg border">
-                                  <div>
-                                    <span className="font-medium">{product.productName || `Product ${index + 1}`}</span>
-                                    <div className="text-sm text-gray-600">
-                                      {product.itemCode} • {product.quantity} {product.pricePerUnit} × ${parseFloat(product.unitPrice || 0).toFixed(2)}
-                                    </div>
-                                  </div>
-                                  <span className="font-medium">
-                                    ${(parseFloat(product.unitPrice || 0) * parseInt(product.quantity || 0)).toFixed(2)} {product.currency}
-                                  </span>
-                                </div>
-                              )
-                            ))}
-                          </div>
-                          
-                          {/* Totals */}
-                          <div className="border-t pt-3">
-                            <div className="flex justify-between items-center">
-                              <span className="text-gray-600">Subtotal:</span>
-                              <span className="font-medium">${calculateTotals().subtotal.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-gray-600">GST (10%):</span>
-                              <span className="font-medium">${calculateTotals().gst.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-lg font-bold text-teal-600 border-t pt-2 mt-2">
-                              <span>Total:</span>
-                              <span>${calculateTotals().total.toFixed(2)} AUD</span>
-                            </div>
-                          </div>
-                          
-                          {/* Contract Status Indicator */}
-                          <div className="border-t pt-3 mt-3">
-                            <div className="flex justify-between items-center">
-                              <span className="text-gray-600">Contract Status:</span>
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                salesContractFile 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {salesContractFile ? 'Signed' : 'Unsigned'}
-                              </span>
-                            </div>
-                            {salesContractFile && signatureForm.signerName && (
-                              <div className="flex justify-between items-center mt-1">
-                                <span className="text-gray-600 text-sm">Signed by:</span>
-                                <span className="text-sm font-medium">{signatureForm.signerName}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                 {/* Order Summary */}
+                 {products.length > 0 && products.some(p => p.unitPrice && p.quantity) && (
+                   <div className="space-y-4">
+                     <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                       <Calculator className="w-5 h-5" />
+                       Order Summary
+                     </h3>
+                     
+                     <div className="bg-gray-50 rounded-lg p-6">
+                       <div className="space-y-4">
+                         {/* Products List */}
+                         <div className="space-y-3">
+                           {products.map((product, index) => (
+                             product.unitPrice && product.quantity && (
+                               <div key={product.id} className="flex justify-between items-center p-3 bg-white rounded-lg border">
+                                 <div>
+                                   <span className="font-medium">{product.productName || `Product ${index + 1}`}</span>
+                                   <div className="text-sm text-gray-600">
+                                     {product.itemCode} • {product.quantity} {product.pricePerUnit} × ${parseFloat(product.unitPrice || 0).toFixed(2)}
+                                   </div>
+                                 </div>
+                                 <span className="font-medium">
+                                   ${(parseFloat(product.unitPrice || 0) * parseInt(product.quantity || 0)).toFixed(2)} {product.currency}
+                                 </span>
+                               </div>
+                             )
+                           ))}
+                         </div>
+                         
+                         {/* Totals */}
+                         <div className="border-t pt-3">
+                           <div className="flex justify-between items-center">
+                             <span className="text-gray-600">Subtotal:</span>
+                             <span className="font-medium">${calculateTotals().subtotal.toFixed(2)}</span>
+                           </div>
+                           <div className="flex justify-between items-center">
+                             <span className="text-gray-600">GST (10%):</span>
+                             <span className="font-medium">${calculateTotals().gst.toFixed(2)}</span>
+                           </div>
+                           <div className="flex justify-between items-center text-lg font-bold text-teal-600 border-t pt-2 mt-2">
+                             <span>Total:</span>
+                             <span>${calculateTotals().total.toFixed(2)} AUD</span>
+                           </div>
+                         </div>
+                         
+                         {/* Contract Status Indicator */}
+                         <div className="border-t pt-3 mt-3">
+                           <div className="flex justify-between items-center">
+                             <span className="text-gray-600">Contract Status:</span>
+                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                               salesContractFile 
+                                 ? 'bg-green-100 text-green-800' 
+                                 : 'bg-yellow-100 text-yellow-800'
+                             }`}>
+                               {salesContractFile ? 'Signed' : 'Unsigned'}
+                             </span>
+                           </div>
+                           {salesContractFile && signatureForm.signerName && (
+                             <div className="flex justify-between items-center mt-1">
+                               <span className="text-gray-600 text-sm">Signed by:</span>
+                               <span className="text-sm font-medium">{signatureForm.signerName}</span>
+                             </div>
+                           )}
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             )}
 
-              {step === 2 && (
-  <div className="text-center py-12">
-    <Loader className="w-12 h-12 animate-spin mx-auto mb-4 text-teal-600" />
-    <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing Order...</h3>
-    <p className="text-gray-600 mb-6">Please wait while we create your order and upload documents.</p>
-    
-    {/* Upload Progress */}
-    {(purchaseOrderFile || salesContractFile || proformaInvoiceFile) && (
-      <div className="space-y-4 max-w-md mx-auto">
-        {purchaseOrderFile && (
-          <div>
-            <div className="flex justify-between text-sm text-gray-600 mb-1">
-              <span>Purchase Order</span>
-              <span>{uploadProgress.po}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${uploadProgress.po}%` }}
-              ></div>
-            </div>
-          </div>
-        )}
-        
-        {salesContractFile && (
-          <div>
-            <div className="flex justify-between text-sm text-gray-600 mb-1">
-              <span>Signed Sales Contract</span>
-              <span>{uploadProgress.contract}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${uploadProgress.contract}%` }}
-              ></div>
-            </div>
-          </div>
-        )}
+             {step === 2 && (
+               <div className="text-center py-12">
+                 <Loader className="w-12 h-12 animate-spin mx-auto mb-4 text-teal-600" />
+                 <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing Order...</h3>
+                 <p className="text-gray-600 mb-6">Please wait while we upload documents and check products.</p>
+                 
+                 {/* Upload Progress */}
+                 {(purchaseOrderFile || salesContractFile || proformaInvoiceFile) && (
+                   <div className="space-y-4 max-w-md mx-auto">
+                     {purchaseOrderFile && (
+                       <div>
+                         <div className="flex justify-between text-sm text-gray-600 mb-1">
+                           <span>Purchase Order</span>
+                           <span>{uploadProgress.po}%</span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2">
+                           <div 
+                             className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                             style={{ width: `${uploadProgress.po}%` }}
+                           ></div>
+                         </div>
+                       </div>
+                     )}
+                     
+                     {salesContractFile && (
+                       <div>
+                         <div className="flex justify-between text-sm text-gray-600 mb-1">
+                           <span>Signed Sales Contract</span>
+                           <span>{uploadProgress.contract}%</span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2">
+                           <div 
+                             className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                             style={{ width: `${uploadProgress.contract}%` }}
+                           ></div>
+                         </div>
+                       </div>
+                     )}
 
-        {proformaInvoiceFile && (
-          <div>
-            <div className="flex justify-between text-sm text-gray-600 mb-1">
-              <span>Proforma Invoice</span>
-              <span>{uploadProgress.proforma}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${uploadProgress.proforma}%` }}
-              ></div>
-            </div>
-          </div>
-        )}
-      </div>
-    )}
-  </div>
-)}
-              {step === 3 && (
-  <div className="text-center py-12">
-    <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-    <h2 className="text-2xl font-bold text-gray-800 mb-2">Order Created Successfully!</h2>
-    <p className="text-gray-600 mb-6">
-      Your order has been created
-      {salesContractFile ? ' with signed contract' : ''}
-      {purchaseOrderFile ? ' and purchase order uploaded' : ''}
-      {proformaInvoiceFile ? ' and proforma invoice uploaded' : ''}.
-    </p>
-    <button
-      onClick={closeModal}
-      className="px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
-    >
-      Continue
-    </button>
-  </div>
-)}
-            </div>
+                     {proformaInvoiceFile && (
+                       <div>
+                         <div className="flex justify-between text-sm text-gray-600 mb-1">
+                           <span>Proforma Invoice</span>
+                           <span>{uploadProgress.proforma}%</span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2">
+                           <div 
+                             className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                             style={{ width: `${uploadProgress.proforma}%` }}
+                           ></div>
+                         </div>
+                       </div>
+                     )}
+                   </div>
+                 )}
+               </div>
+             )}
 
-            {/* Footer */}
+             {step === 3 && (
+               <div className="space-y-6">
+                 <div className="text-center">
+                   <Package className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                   <h2 className="text-2xl font-bold text-gray-800 mb-2">Product Database Check</h2>
+                   <p className="text-gray-600">
+                     We found {missingProducts.length} product{missingProducts.length !== 1 ? 's' : ''} that {missingProducts.length === 1 ? 'is' : 'are'} not in our database.
+                   </p>
+                 </div>
+
+                 {missingProducts.length > 0 && (
+                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                     <div className="flex items-start gap-3 mb-4">
+                       <AlertCircle className="w-6 h-6 text-yellow-600 mt-1 flex-shrink-0" />
+                       <div>
+                         <h3 className="font-semibold text-yellow-800 mb-2">Missing Products Found</h3>
+                         <p className="text-yellow-700 text-sm mb-4">
+                           The following products are not in our database. Would you like to add them? 
+                           This will make them available for future orders.
+                         </p>
+                       </div>
+                     </div>
+
+                     <div className="space-y-4">
+                       <div className="flex items-center justify-between mb-4">
+                         <h4 className="font-medium text-gray-800">Select products to add to database:</h4>
+                         <div className="flex gap-2">
+                           <button
+                             onClick={() => setProductsToAdd([])}
+                             className="text-sm px-3 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
+                           >
+                             Select None
+                           </button>
+                           <button
+                             onClick={() => setProductsToAdd([...missingProducts])}
+                             className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                           >
+                             Select All
+                           </button>
+                         </div>
+                       </div>
+
+                       {missingProducts.map((product) => (
+                         <div key={product.id} className="border border-gray-200 rounded-lg p-4 bg-white">
+                           <div className="flex items-start gap-3">
+                             <input
+                               type="checkbox"
+                               checked={productsToAdd.some(p => p.id === product.id)}
+                               onChange={() => toggleProductToAdd(product.id)}
+                               className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                             />
+                             <div className="flex-1">
+                               <div className="flex items-center gap-3 mb-2">
+                                 <span className="font-mono font-semibold text-blue-600">{product.itemCode}</span>
+                                 {product.isACRSCertified && (
+                                   <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                                     <Shield className="w-3 h-3 mr-1" />
+                                     ACRS
+                                   </span>
+                                 )}
+                               </div>
+                               <h4 className="font-medium text-gray-900 mb-1">{product.productName}</h4>
+                               <p className="text-sm text-gray-600 mb-2">{product.description}</p>
+                               <div className="flex items-center gap-4 text-xs text-gray-500">
+                                 <span>{product.category}</span>
+                                 <span>{product.material}</span>
+                                 <span className="font-semibold text-green-600">
+                                   ${parseFloat(product.unitPrice || 0).toFixed(2)} {product.currency}/{product.pricePerUnit}
+                                 </span>
+                               </div>
+                             </div>
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+
+                     <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                       <div className="flex items-start gap-2">
+                         <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                         <div className="text-sm text-blue-800">
+                           <p className="font-medium mb-1">What happens next:</p>
+                           <ul className="space-y-1 text-blue-700">
+                             <li>• Selected products will be added to the products database</li>
+                             <li>• They will be available for future orders and product lookups</li>
+                             <li>• Your order will be created regardless of your selection</li>
+                             <li>• You can skip this step if you don't want to add any products</li>
+                           </ul>
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             )}
+
+             {step === 4 && (
+               <div className="text-center py-12">
+                 <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                 <h2 className="text-2xl font-bold text-gray-800 mb-2">Order Created Successfully!</h2>
+                 <p className="text-gray-600 mb-6">
+                   Your order has been created
+                   {salesContractFile ? ' with signed contract' : ''}
+                   {purchaseOrderFile ? ' and purchase order uploaded' : ''}
+                   {proformaInvoiceFile ? ' and proforma invoice uploaded' : ''}.
+                   {productsToAdd.length > 0 && ` ${productsToAdd.length} product${productsToAdd.length !== 1 ? 's' : ''} ${productsToAdd.length === 1 ? 'was' : 'were'} added to the database.`}
+                 </p>
+                 <button
+                   onClick={closeModal}
+                   className="px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
+                 >
+                   Continue
+                 </button>
+               </div>
+             )}
+           </div>
+
+           {/* Footer */}
            {step === 1 && (
-  <div className="p-6 border-t border-gray-200 flex justify-between">
-    <button
-      onClick={closeModal}
-      className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-      disabled={loading}
-    >
-      Cancel
-    </button>
-    
-    <button
-      onClick={handleSubmit}
-      disabled={
-        loading || 
-        !userEmail || 
-        !orderForm.poNumber ||  // Add this line
-        !products.every(p => p.itemCode && p.productName && p.unitPrice && p.quantity) || 
-        !orderForm.customerInfo.companyName
-      }
-      className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-    >
-      {loading ? (
-        <>
-          <Loader className="w-4 h-4 animate-spin" />
-          Creating Order...
-        </>
-      ) : (
-        <>
-          <Save className="w-4 h-4" />
-          Create Order
-        </>
-      )}
-    </button>
-  </div>
-)}
-          </motion.div>
-        </div>
-      )}
-    </>
-  );
+             <div className="p-6 border-t border-gray-200 flex justify-between">
+               <button
+                 onClick={closeModal}
+                 className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                 disabled={loading}
+               >
+                 Cancel
+               </button>
+               
+               <button
+                 onClick={handleSubmit}
+                 disabled={
+                   loading || 
+                   !userEmail || 
+                   !orderForm.poNumber ||
+                   !products.every(p => p.itemCode && p.productName && p.unitPrice && p.quantity) || 
+                   !orderForm.customerInfo.companyName
+                 }
+                 className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+               >
+                 {loading ? (
+                   <>
+                     <Loader className="w-4 h-4 animate-spin" />
+                     Creating Order...
+                   </>
+                 ) : (
+                   <>
+                     <Save className="w-4 h-4" />
+                     Create Order
+                   </>
+                 )}
+               </button>
+             </div>
+           )}
+
+           {step === 3 && (
+             <div className="p-6 border-t border-gray-200 flex justify-between">
+               <button
+                 onClick={() => {
+                   // Skip adding products and proceed with order creation
+                   setProductsToAdd([]);
+                   handleProductCheckComplete();
+                 }}
+                 className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                 disabled={loading || addingProducts}
+               >
+                 Skip & Continue
+               </button>
+               
+               <button
+                 onClick={handleProductCheckComplete}
+                 disabled={loading || addingProducts}
+                 className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+               >
+                 {loading || addingProducts ? (
+                   <>
+                     <Loader className="w-4 h-4 animate-spin" />
+                     {addingProducts ? 'Adding Products...' : 'Creating Order...'}
+                   </>
+                 ) : (
+                   <>
+                     <Save className="w-4 h-4" />
+                     {productsToAdd.length > 0 ? `Add ${productsToAdd.length} Product${productsToAdd.length !== 1 ? 's' : ''} & Create Order` : 'Create Order'}
+                   </>
+                 )}
+               </button>
+             </div>
+           )}
+         </motion.div>
+       </div>
+     )}
+   </>
+ );
 };
 
 export default AddOrderComponent;
