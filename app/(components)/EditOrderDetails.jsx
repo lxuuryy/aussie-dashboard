@@ -257,7 +257,7 @@ const EditOrderDetails = () => {
           contactPerson: orderData.customerInfo?.contactPerson || '',
           email: orderData.customerInfo?.email || '',
           phone: orderData.customerInfo?.phone || '',
-          abn: orderData.customerInfo?.abn || '',
+          abn: orderData.customerCompanyData?.abn || '',
           address: {
             street: orderData.customerInfo?.address?.street || '',
             city: orderData.customerInfo?.address?.city || '',
