@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 
 // API URLs and Keys
 const API_URL = '/api/visiwise';
-const GOOGLE_MAPS_API_KEY = 'AIzaSyCtrM0nEB2OOEEfQ7sFG8AURtV3KeyPrRM';
+const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ;
 
 // Embedded API Keys
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
