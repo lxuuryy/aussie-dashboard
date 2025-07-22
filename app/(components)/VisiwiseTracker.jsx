@@ -7,7 +7,7 @@ const API_URL = '/api/visiwise';
 const GOOGLE_MAPS_API_KEY = 'AIzaSyCtrM0nEB2OOEEfQ7sFG8AURtV3KeyPrRM';
 
 // Embedded API Keys
-const OPENAI_API_KEY = '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';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const CompleteVisiwiseTracker = () => {
   const [trackingData, setTrackingData] = useState({
