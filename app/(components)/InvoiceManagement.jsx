@@ -656,22 +656,48 @@ const InvoiceManagement = () => {
                               >
                                 <Edit className="w-4 h-4" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openPerformaInvoice(invoice)}
-                                title="Create Performa Invoice"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openContractEditor(invoice)}
-                                title="Generate Sales Contract"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </Button>
+                              {invoice.proformaInvoiceUrl ? (
+  <Button
+    variant="ghost"
+    size="sm"
+    onClick={() => window.open(invoice.proformaInvoiceUrl, '_blank')}
+    title="View Proforma Invoice"
+    className="text-green-600 hover:text-green-700"
+  >
+    <Eye className="w-4 h-4" />
+  </Button>
+) : (
+  <Button
+    variant="ghost"
+    size="sm"
+    onClick={() => openPerformaInvoice(invoice)}
+    title="Generate Proforma Invoice"
+    className="text-amber-600 hover:text-amber-700"
+  >
+    <AlertCircle className="w-4 h-4" />
+  </Button>
+)}
+                              {invoice.contractUrl ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => window.open(invoice.contractUrl, '_blank')}
+        title="View Sales Contract"
+        className="text-green-600 hover:text-green-700"
+      >
+        <Eye className="w-4 h-4" />
+      </Button>
+    ) : (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => openContractEditor(invoice)}
+        title="Generate Sales Contract"
+        className="text-amber-600 hover:text-amber-700"
+      >
+        <AlertCircle className="w-4 h-4" />
+      </Button>
+    )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -804,24 +830,49 @@ const InvoiceManagement = () => {
                                </Badge>
                              )}
 
-                             <Button
-                               variant="outline"
-                               size="sm"
-                               onClick={() => openPerformaInvoice(invoice)}
-                               title="Edit Open Performa Invoice"
-                             >
-                               <Edit className="w-4 h-4 mr-2" />
-                               Performa
-                             </Button>
+                            {invoice.proformaInvoiceUrl ? (
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => window.open(invoice.proformaInvoiceUrl, '_blank')}
+    className="text-green-600 border-green-200 hover:bg-green-50"
+  >
+    <Eye className="w-4 h-4 mr-2" />
+    View Proforma
+  </Button>
+) : (
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => openPerformaInvoice(invoice)}
+    className="text-amber-600 border-amber-200 hover:bg-amber-50"
+  >
+    <AlertCircle className="w-4 h-4 mr-2" />
+    Generate Proforma
+  </Button>
+)}
                              
-                             <Button
-                               variant="outline"
-                               size="sm"
-                               onClick={() => openContractEditor(invoice)}
-                             >
-                               <Edit className="w-4 h-4 mr-2" />
-                               Edit Contract
-                             </Button>
+                             {invoice.contractUrl ? (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => window.open(invoice.contractUrl, '_blank')}
+        className="text-green-600 border-green-200 hover:bg-green-50"
+      >
+        <Eye className="w-4 h-4 mr-2" />
+        View Contract
+      </Button>
+    ) : (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => openContractEditor(invoice)}
+        className="text-amber-600 border-amber-200 hover:bg-amber-50"
+      >
+        <AlertCircle className="w-4 h-4 mr-2" />
+        Generate Contract
+      </Button>
+    )}
                              
                              <Button
                                variant="outline"

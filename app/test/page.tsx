@@ -2,6 +2,7 @@
 
 import VisiwiseTracker from "../(components)/VisiwiseTracker" 
 import PDFGenerator from "@/app/(components)/PDFGenerator"
+import SMSSender from "@/app/(components)/SMSSender"
 
 
 
@@ -12,7 +13,7 @@ const page = (props: Props) => {
   return (
     <div>
       
-      <VisiwiseTracker />
+     <SMSSender />
      
     </div>
   )
