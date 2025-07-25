@@ -3294,7 +3294,178 @@ return (
               </div>
             )}
 
-            {/* Other steps remain the same... */}
+            {step === 2 && (
+               <div className="text-center py-12">
+                 <Loader className="w-12 h-12 animate-spin mx-auto mb-4 text-teal-600" />
+                 <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing Order...</h3>
+                 <p className="text-gray-600 mb-6">Please wait while we upload documents and check products.</p>
+                 
+                 {/* Upload Progress */}
+                 {(purchaseOrderFile || salesContractFile || proformaInvoiceFile) && (
+                   <div className="space-y-4 max-w-md mx-auto">
+                     {purchaseOrderFile && (
+                       <div>
+                         <div className="flex justify-between text-sm text-gray-600 mb-1">
+                           <span>Purchase Order</span>
+                           <span>{uploadProgress.po}%</span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2">
+                           <div 
+                             className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                             style={{ width: `${uploadProgress.po}%` }}
+                           ></div>
+                         </div>
+                       </div>
+                     )}
+                     
+                     {salesContractFile && (
+                       <div>
+                         <div className="flex justify-between text-sm text-gray-600 mb-1">
+                           <span>Signed Sales Contract</span>
+                           <span>{uploadProgress.contract}%</span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2">
+                           <div 
+                             className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                             style={{ width: `${uploadProgress.contract}%` }}
+                           ></div>
+                         </div>
+                       </div>
+                     )}
+
+                     {proformaInvoiceFile && (
+                       <div>
+                         <div className="flex justify-between text-sm text-gray-600 mb-1">
+                           <span>Proforma Invoice</span>
+                           <span>{uploadProgress.proforma}%</span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2">
+                           <div 
+                             className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                             style={{ width: `${uploadProgress.proforma}%` }}
+                           ></div>
+                         </div>
+                       </div>
+                     )}
+                   </div>
+                 )}
+               </div>
+             )}
+
+             {step === 3 && (
+               <div className="space-y-6">
+                 <div className="text-center">
+                   <Package className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                   <h2 className="text-2xl font-bold text-gray-800 mb-2">Product Database Check</h2>
+                   <p className="text-gray-600">
+                     We found {missingProducts.length} product{missingProducts.length !== 1 ? 's' : ''} that {missingProducts.length === 1 ? 'is' : 'are'} not in our database.
+                   </p>
+                 </div>
+
+                 {missingProducts.length > 0 && (
+                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                     <div className="flex items-start gap-3 mb-4">
+                       <AlertCircle className="w-6 h-6 text-yellow-600 mt-1 flex-shrink-0" />
+                       <div>
+                         <h3 className="font-semibold text-yellow-800 mb-2">Missing Products Found</h3>
+                         <p className="text-yellow-700 text-sm mb-4">
+                           The following products are not in our database. Would you like to add them? 
+                           This will make them available for future orders.
+                         </p>
+                       </div>
+                     </div>
+
+                     <div className="space-y-4">
+                       <div className="flex items-center justify-between mb-4">
+                         <h4 className="font-medium text-gray-800">Select products to add to database:</h4>
+                         <div className="flex gap-2">
+                           <button
+                             onClick={() => setProductsToAdd([])}
+                             className="text-sm px-3 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
+                           >
+                             Select None
+                           </button>
+                           <button
+                             onClick={() => setProductsToAdd([...missingProducts])}
+                             className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                           >
+                             Select All
+                           </button>
+                         </div>
+                       </div>
+
+                       {missingProducts.map((product) => (
+                         <div key={product.id} className="border border-gray-200 rounded-lg p-4 bg-white">
+                           <div className="flex items-start gap-3">
+                             <input
+                               type="checkbox"
+                               checked={productsToAdd.some(p => p.id === product.id)}
+                               onChange={() => toggleProductToAdd(product.id)}
+                               className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                             />
+                             <div className="flex-1">
+                               <div className="flex items-center gap-3 mb-2">
+                                 <span className="font-mono font-semibold text-blue-600">{product.itemCode}</span>
+                                 {product.isACRSCertified && (
+                                   <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                                     <Shield className="w-3 h-3 mr-1" />
+                                     ACRS
+                                   </span>
+                                 )}
+                               </div>
+                               <h4 className="font-medium text-gray-900 mb-1">{product.productName}</h4>
+                               <p className="text-sm text-gray-600 mb-2">{product.description}</p>
+                               <div className="flex items-center gap-4 text-xs text-gray-500">
+                                 <span>{product.category}</span>
+                                 <span>{product.material}</span>
+                                 <span className="font-semibold text-green-600">
+                                   ${parseFloat(product.unitPrice || 0).toFixed(2)} {product.currency}/{product.pricePerUnit}
+                                 </span>
+                               </div>
+                             </div>
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+
+                     <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                       <div className="flex items-start gap-2">
+                         <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                         <div className="text-sm text-blue-800">
+                           <p className="font-medium mb-1">What happens next:</p>
+                           <ul className="space-y-1 text-blue-700">
+                             <li>• Selected products will be added to the products database</li>
+                             <li>• They will be available for future orders and product lookups</li>
+                             <li>• Your order will be created regardless of your selection</li>
+                             <li>• You can skip this step if you don't want to add any products</li>
+                           </ul>
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             )}
+
+             {step === 4 && (
+               <div className="text-center py-12">
+                 <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                 <h2 className="text-2xl font-bold text-gray-800 mb-2">Order Created Successfully!</h2>
+                 <p className="text-gray-600 mb-6">
+                   Your order has been created
+                   {salesContractFile ? ' with signed contract' : ''}
+                   {purchaseOrderFile ? ' and purchase order uploaded' : ''}
+                   {proformaInvoiceFile ? ' and proforma invoice uploaded' : ''}.
+                   {productsToAdd.length > 0 && ` ${productsToAdd.length} product${productsToAdd.length !== 1 ? 's' : ''} ${productsToAdd.length === 1 ? 'was' : 'were'} added to the database.`}
+                 </p>
+                 <button
+                   onClick={closeModal}
+                   className="px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
+                 >
+                   Continue
+                 </button>
+               </div>
+             )}
           </div>
 
           {/* Footer */}
