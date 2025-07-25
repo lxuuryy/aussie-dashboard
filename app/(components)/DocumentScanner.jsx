@@ -1,1017 +1,919 @@
-'use client';
-
-import React, { useState, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Upload,
-  Camera,
-  FileText,
-  Loader,
-  CheckCircle,
-  AlertCircle,
-  Edit,
-  Save,
-  X,
-  Eye,
+'use client'
+import React, { useState, useCallback } from 'react';
+import { 
+  Upload, 
+  Scan, 
+  FileText, 
+  Eye, 
+  Loader2, 
+  CheckCircle, 
+  AlertCircle, 
   Download,
-  Scan,
   RefreshCw,
-  Building,
-  Mail,
-  Phone,
-  MapPin,
+  Zap,
+  FileImage,
+  File,
+  X,
+  Brain,
+  Sparkles,
+  Search,
+  Copy,
+  Edit3,
   Package,
   DollarSign,
   Calendar,
-  User
+  Building,
+  User,
+  Mail,
+  Phone,
+  MapPin
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import * as mammoth from 'mammoth';
 
-const DocumentScanner = () => {
-  const router = useRouter();
-  const fileInputRef = useRef(null);
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [isScanning, setIsScanning] = useState(false);
+const DocumentScanner = ({ onDataExtracted, onClose }) => {
+  const [file, setFile] = useState(null);
+  const [scanning, setScanning] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [rawText, setRawText] = useState('');
   const [error, setError] = useState(null);
   const [scanProgress, setScanProgress] = useState(0);
+  const [previewMode, setPreviewMode] = useState('structured');
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
-  // Initialize form data structure based on your database schema
-  const [formData, setFormData] = useState({
-    // Customer Information
-    customerInfo: {
-      companyName: '',
-      contactPerson: '',
-      email: '',
-      phone: '',
-      address: {
-        street: '',
-        city: '',
-        state: '',
-        postcode: '',
-        country: 'Australia'
+  // Supported file types
+  const supportedTypes = {
+    'application/pdf': 'PDF Document',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word Document',
+    'application/msword': 'Word Document (Legacy)',
+    'text/plain': 'Text File',
+    'image/jpeg': 'JPEG Image',
+    'image/png': 'PNG Image',
+    'image/webp': 'WebP Image',
+    'text/html': 'HTML Document'
+  };
+
+  // Extract text from PDF using pdf-parse alternative
+  const extractTextFromPDF = async (file) => {
+    try {
+      // Load PDF.js from CDN
+      if (!window.pdfjsLib) {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        document.head.appendChild(script);
+        
+        await new Promise((resolve) => {
+          script.onload = resolve;
+        });
+        
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }
-    },
-    // Product Information
-    items: [{
-      barType: '',
-      length: '',
-      quantity: '',
-      totalWeight: '',
-      pricePerTonne: '',
-      totalPrice: ''
-    }],
-    // Order Details
-    poNumber: '',
-    orderDate: new Date().toISOString().split('T')[0],
-    deliveryDate: '',
-    reference: '',
-    notes: '',
-    salesContract: '',
-    // Financial
-    subtotal: 0,
-    gst: 0,
-    totalAmount: 0,
-    // Assigned Users (from your multi-email system)
-    assignedUsers: []
-  });
 
-  // Handle file upload
-  const handleFileUpload = useCallback((file) => {
-    if (!file) return;
-
-    // Validate file type
-    const validTypes = [
-      'image/jpeg', 
-      'image/png', 
-      'image/webp', 
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // DOCX
-    ];
-    
-    // Also check file extension for DOCX (sometimes MIME type is not detected correctly)
-    const fileName = file.name.toLowerCase();
-    const isDocx = fileName.endsWith('.docx');
-    
-    if (!validTypes.includes(file.type) && !isDocx) {
-      setError('Please upload a valid file: Images (JPEG, PNG, WebP), PDF, or Word documents (.docx)');
-      return;
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let fullText = '';
+      const totalPages = pdf.numPages;
+      
+      for (let i = 1; i <= totalPages; i++) {
+        setScanProgress((i / totalPages) * 30); // First 30% for extraction
+        
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        fullText += pageText + '\n\n';
+      }
+      
+      return fullText;
+    } catch (error) {
+      console.error('PDF extraction error:', error);
+      throw new Error('Failed to extract text from PDF. Please ensure the PDF contains selectable text.');
     }
+  };
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB');
-      return;
+  // Extract text from DOCX files
+  const extractTextFromDOCX = async (file) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return result.value;
+    } catch (error) {
+      console.error('DOCX extraction error:', error);
+      throw new Error('Failed to extract text from Word document.');
     }
+  };
 
-    setUploadedFile(file);
-    setError(null);
+  // OCR simulation for images (in production, use real OCR service)
+  const performOCR = async (file) => {
+    // In a real implementation, you would use:
+    // - Google Vision API
+    // - AWS Textract
+    // - Azure Computer Vision
+    // - Tesseract.js for client-side OCR
+    
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error('OCR functionality requires integration with an OCR service. Please upload a text-based document instead.'));
+      }, 2000);
+    });
+  };
 
-    // Create preview for images only
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (e) => setPreview(e.target.result);
-      reader.readAsDataURL(file);
+  // Main text extraction function
+  const extractTextFromFile = async (file) => {
+    const fileType = file.type;
+    
+    if (fileType === 'application/pdf') {
+      return await extractTextFromPDF(file);
+    } else if (fileType.includes('wordprocessingml') || fileType === 'application/msword') {
+      return await extractTextFromDOCX(file);
+    } else if (fileType === 'text/plain' || fileType === 'text/html') {
+      return await file.text();
+    } else if (fileType.startsWith('image/')) {
+      return await performOCR(file);
     } else {
-      setPreview(null);
+      throw new Error(`Unsupported file type: ${fileType}`);
     }
-  }, []);
+  };
 
-  // Handle drag and drop
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      handleFileUpload(files[0]);
-    }
-  }, [handleFileUpload]);
+  // OpenAI API call for intelligent data extraction
+  const extractDataWithOpenAI = async (text, userApiKey) => {
 
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-  }, []);
+    console.log(text)
+    const prompt = `
+You are an expert document parser. Extract structured data from the following document text and return it as a JSON object.
 
-  // Scan document with OpenAI
-  const scanDocument = async () => {
-    if (!uploadedFile) {
-      setError('Please upload a document first');
-      return;
-    }
+The document appears to be a purchase order, invoice, or business document. Extract the following information:
 
-    setIsScanning(true);
-    setScanProgress(0);
-    setError(null);
+1. Order Information:
+   - poNumber (purchase order number)
+   - orderDate (in YYYY-MM-DD format)
+   - estimatedDelivery (in YYYY-MM-DD format)
+   - reference
+   - notes
+
+2. Customer Information:
+   - companyName
+   - contactPerson
+   - email
+   - phone
+   - abn (Australian Business Number if present)
+   - address (object with street, city, state, postcode, country)
+
+3. Vendor/Supplier Information:
+   - companyName
+   - contactPerson
+   - email
+   - phone
+   - abn
+   - address (object with street, city, state, postcode, country)
+
+4. Delivery Address:
+   - street
+   - city
+   - state
+   - postcode
+   - country
+
+5. Products Array (each product should have):
+   - itemCode
+   - productName
+   - description
+   - quantity (as number)
+   - unitPrice (as number)
+   - pricePerUnit (e.g., "each", "meter", "kg")
+   - currency (e.g., "AUD", "USD")
+   - category (try to determine from description)
+   - material (if mentioned)
+   - dimensions (object with length, width, height, diameter, thickness, unit)
+   - weight (if mentioned)
+
+6. Financial Information:
+   - subtotal (as number)
+   - gst (as number)
+   - total (as number)
+   - currency
+
+7. Terms:
+   - paymentTerms
+   - deliveryTerms
+   - documentation
+   - quantityTolerance
+
+Extract only the information that is clearly present in the document. Use null for missing values.
+For Australian addresses, common states are: VIC, NSW, QLD, SA, WA, TAS, NT, ACT.
+For dates, convert to YYYY-MM-DD format.
+For numbers, extract as actual numbers, not strings.
+
+Return only valid JSON without any additional text or explanation.
+
+Document text:
+${text}`;
 
     try {
-      // Convert file to base64
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(uploadedFile);
-      });
-
-      setScanProgress(30);
-
-      // Send to API
-      const response = await fetch('/api/scan-document', {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userApiKey}`
         },
         body: JSON.stringify({
-          fileData: base64,
-          fileName: uploadedFile.name,
-          fileType: uploadedFile.type
-        }),
+          model: 'gpt-4',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert document parser that extracts structured business data from documents. Always respond with valid JSON only.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 2000
+        })
       });
-
-      setScanProgress(70);
 
       if (!response.ok) {
-        throw new Error(`Failed to scan document: ${response.statusText}`);
+        const errorData = await response.json();
+        throw new Error(`OpenAI API error: ${errorData.error?.message || response.statusText}`);
       }
 
-      const result = await response.json();
-      setScanProgress(100);
-
-      if (result.success) {
-        setExtractedData(result.data);
-        setFormData(prev => ({
-          ...prev,
-          ...result.data,
-          // Preserve some defaults
-          orderDate: result.data.orderDate || prev.orderDate,
-          assignedUsers: result.data.assignedUsers || [{
-            id: user?.id || 'current',
-            name: user?.fullName || 'Current User',
-            email: user?.emailAddresses?.[0]?.emailAddress || '',
-            type: 'self'
-          }]
-        }));
-        setIsEditing(true);
-      } else {
-        throw new Error(result.error || 'Failed to extract data from document');
+      const data = await response.json();
+      console.log('OpenAI API response:', data);
+      const extractedText = data.choices[0].message.content;
+      
+      // Parse the JSON response
+      try {
+        const parsedData = JSON.parse(extractedText);
+        return parsedData;
+      } catch (parseError) {
+        console.error('Failed to parse OpenAI response as JSON:', extractedText);
+        throw new Error('OpenAI returned invalid JSON. Please try again.');
       }
-
+      
     } catch (error) {
-      console.error('Error scanning document:', error);
-      setError(error.message || 'Failed to scan document. Please try again.');
-    } finally {
-      setIsScanning(false);
-      setScanProgress(0);
+      console.error('OpenAI API error:', error);
+      throw error;
     }
   };
 
-  // Handle form input changes
-  const handleInputChange = (field, value) => {
-    if (field.includes('.')) {
-      const fields = field.split('.');
-      setFormData(prev => {
-        const newData = { ...prev };
-        let current = newData;
-        for (let i = 0; i < fields.length - 1; i++) {
-          current = current[fields[i]];
-        }
-        current[fields[fields.length - 1]] = value;
-        return newData;
-      });
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [field]: value
-      }));
+  // Handle file selection
+  const handleFileSelect = (event) => {
+    const selectedFile = event.target.files[0];
+    if (!selectedFile) return;
+
+    // Check file type
+    if (!Object.keys(supportedTypes).includes(selectedFile.type)) {
+      setError(`Unsupported file type: ${selectedFile.type}`);
+      return;
     }
 
-    // Auto-calculate totals when financial fields change
-    if (['subtotal', 'gst'].includes(field)) {
-      calculateTotals();
+    // Check file size (max 50MB)
+    if (selectedFile.size > 50 * 1024 * 1024) {
+      setError('File size must be less than 50MB');
+      return;
     }
-  };
 
-  // Calculate financial totals
-  const calculateTotals = () => {
-    const subtotal = parseFloat(formData.subtotal) || 0;
-    const gst = subtotal * 0.1; // 10% GST
-    const total = subtotal + gst;
-
-    setFormData(prev => ({
-      ...prev,
-      gst: parseFloat(gst.toFixed(2)),
-      totalAmount: parseFloat(total.toFixed(2))
-    }));
-  };
-
-  // Save order to database
-  const saveOrder = async () => {
-    setIsSaving(true);
+    setFile(selectedFile);
     setError(null);
+    setExtractedData(null);
+    setRawText('');
+    setScanProgress(0);
+  };
+
+  // Scan document
+  const scanDocument = async () => {
+    if (!file) return;
+
+    // Check if API key is provided
+    const currentApiKey = apiKey || localStorage.getItem('openai_api_key');
+    if (!currentApiKey) {
+      setShowApiKeyInput(true);
+      return;
+    }
+
+    setScanning(true);
+    setError(null);
+    setScanProgress(0);
 
     try {
-      // Generate PO number if not provided
-      const poNumber = formData.poNumber || `PO-${Date.now()}`;
+      // Extract text from file
+      setScanProgress(10);
+      const text = await extractTextFromFile(file);
+      setRawText(text);
       
-      const orderData = {
-        ...formData,
-        poNumber,
-        userId: user?.id,
-        userEmail: user?.emailAddresses?.[0]?.emailAddress,
-        status: 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        scannedFrom: uploadedFile.name,
-        extractedData: extractedData // Store original extracted data for reference
-      };
-
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(orderData),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save order');
+      // Process with OpenAI
+      setScanProgress(50);
+      const structuredData = await extractDataWithOpenAI(text, currentApiKey);
+      setExtractedData(structuredData);
+      
+      setScanProgress(100);
+      
+      // Save API key for future use (optional)
+      if (apiKey) {
+        localStorage.setItem('openai_api_key', apiKey);
       }
-
-      const result = await response.json();
       
-      // Success - redirect to order details or invoice management
-      router.push(`/dashboard/invoice-management`);
-
-    } catch (error) {
-      console.error('Error saving order:', error);
-      setError('Failed to save order. Please try again.');
+    } catch (err) {
+      setError(err.message);
+      console.error('Scanning error:', err);
     } finally {
-      setIsSaving(false);
+      setScanning(false);
     }
   };
 
-  // Reset component
-  const resetScanner = () => {
-    setUploadedFile(null);
-    setPreview(null);
-    setExtractedData(null);
-    setIsEditing(false);
-    setError(null);
-    setFormData({
+  // Apply extracted data to form
+  const applyExtractedData = () => {
+    if (!extractedData) return;
+    
+    // Transform the OpenAI response to match the expected form structure
+    const transformedData = {
+      // Basic order info
+      poNumber: extractedData.poNumber || '',
+      orderDate: extractedData.orderDate || '',
+      estimatedDelivery: extractedData.estimatedDelivery || '',
+      reference: extractedData.reference || '',
+      notes: extractedData.notes || '',
+
+      // Customer information
       customerInfo: {
-        companyName: '',
-        contactPerson: '',
-        email: '',
-        phone: '',
-        address: {
+        companyName: extractedData.customerInfo?.companyName || extractedData.customer?.companyName || '',
+        contactPerson: extractedData.customerInfo?.contactPerson || extractedData.customer?.contactPerson || '',
+        email: extractedData.customerInfo?.email || extractedData.customer?.email || '',
+        phone: extractedData.customerInfo?.phone || extractedData.customer?.phone || '',
+        abn: extractedData.customerInfo?.abn || extractedData.customer?.abn || '',
+        address: extractedData.customerInfo?.address || extractedData.customer?.address || {
           street: '',
           city: '',
-          state: '',
+          state: 'VIC',
           postcode: '',
           country: 'Australia'
         }
       },
-      items: [{
-        barType: '',
-        length: '',
-        quantity: '',
-        totalWeight: '',
-        pricePerTonne: '',
-        totalPrice: ''
-      }],
-      poNumber: '',
-      orderDate: new Date().toISOString().split('T')[0],
-      deliveryDate: '',
-      reference: '',
-      notes: '',
-      salesContract: '',
-      subtotal: 0,
-      gst: 0,
-      totalAmount: 0,
-      assignedUsers: []
-    });
+
+      // Delivery address
+      deliveryAddress: extractedData.deliveryAddress || extractedData.delivery?.address || {
+        street: '',
+        city: '',
+        state: 'VIC',
+        postcode: '',
+        country: 'Australia'
+      },
+
+      // Products
+      products: (extractedData.products || extractedData.items || []).map(product => ({
+        itemCode: product.itemCode || '',
+        productName: product.productName || product.name || '',
+        description: product.description || '',
+        quantity: product.quantity || 1,
+        unitPrice: product.unitPrice || product.price || '',
+        pricePerUnit: product.pricePerUnit || 'each',
+        currency: product.currency || 'AUD',
+        category: product.category || 'Steel Products',
+        material: product.material || 'AS/NZS 4671:2019',
+        dimensions: {
+          length: product.dimensions?.length || '',
+          width: product.dimensions?.width || '',
+          height: product.dimensions?.height || '',
+          diameter: product.dimensions?.diameter || '',
+          thickness: product.dimensions?.thickness || '',
+          unit: product.dimensions?.unit || 'mm'
+        },
+        weight: product.weight || '',
+        finish: 'Raw/Mill Finish',
+        specifications: [],
+        tags: [],
+        isACRSCertified: false
+      })),
+
+      // Terms
+      paymentTerms: extractedData.terms?.paymentTerms || extractedData.paymentTerms || '30 Days from delivery to yard',
+      deliveryTerms: extractedData.terms?.deliveryTerms || extractedData.deliveryTerms || 'Delivery Duty paid - unloading by purchaser',
+      documentation: extractedData.terms?.documentation || 'Commercial Invoice Certificate of Origin Mill Test Certificates ACRS Certification',
+      quantityTolerance: extractedData.terms?.quantityTolerance || '+/- 10%',
+
+      // Financial data
+      financials: {
+        subtotal: extractedData.subtotal || extractedData.financials?.subtotal || 0,
+        gst: extractedData.gst || extractedData.financials?.gst || 0,
+        total: extractedData.total || extractedData.financials?.total || 0
+      }
+    };
+    
+    onDataExtracted(transformedData);
+    onClose();
+  };
+
+  // Copy to clipboard
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  // Save API key
+  const saveApiKey = () => {
+    if (apiKey.trim()) {
+      localStorage.setItem('openai_api_key', apiKey.trim());
+      setShowApiKeyInput(false);
+      scanDocument();
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl max-w-6xl w-full max-h-[95vh] overflow-hidden flex flex-col shadow-2xl">
         {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center gap-3 mb-2">
-            <Scan className="w-8 h-8 text-teal-600" />
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Document Scanner</h1>
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                <Brain className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-800">AI Document Scanner</h2>
+                <p className="text-sm text-gray-600">Extract data from PDFs, Word docs using OpenAI</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
           </div>
-          <p className="text-gray-600">Upload and scan documents to automatically generate orders</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left Column - Upload & Preview */}
-          <div className="space-y-6">
-            {/* Upload Area */}
-            <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-              <div className="p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Document</h2>
-                
-                {!uploadedFile ? (
-                  <div
-                    className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-teal-400 transition-colors cursor-pointer"
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                    onClick={() => fileInputRef.current?.click()}
+        {/* Content */}
+        <div className="p-6 overflow-y-auto flex-1">
+          {showApiKeyInput ? (
+            // API Key Input
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Zap className="w-8 h-8 text-yellow-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">OpenAI API Key Required</h3>
+              <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                To use AI-powered document parsing, please provide your OpenAI API key. 
+                Your key will be stored locally and used only for document processing.
+              </p>
+              
+              <div className="max-w-md mx-auto space-y-4">
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowApiKeyInput(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                      Drop your document here
-                    </h3>
-                    <p className="text-gray-600 mb-4">
-                      or click to browse files
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Supports PDF, DOCX, JPEG, PNG, WebP (max 10MB)
-                    </p>
-                    
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".pdf,.docx,.jpg,.jpeg,.png,.webp"
-                      onChange={(e) => handleFileUpload(e.target.files[0])}
-                      className="hidden"
-                    />
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveApiKey}
+                    disabled={!apiKey.trim()}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+                  >
+                    Save & Scan
+                  </button>
+                </div>
+              </div>
+              
+              <div className="mt-6 p-4 bg-blue-50 rounded-lg max-w-md mx-auto">
+                <p className="text-xs text-blue-800">
+                  Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">OpenAI Platform</a>. 
+                  Your key is stored locally and never shared.
+                </p>
+              </div>
+            </div>
+          ) : !file ? (
+            // File Upload
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Upload className="w-8 h-8 text-blue-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Upload Document</h3>
+              <p className="text-gray-600 mb-6">
+                Select a purchase order, invoice, or contract to extract data automatically with AI
+              </p>
+              
+              <input
+                type="file"
+                accept=".pdf,.docx,.doc,.txt,.html,.jpg,.jpeg,.png,.webp"
+                onChange={handleFileSelect}
+                className="hidden"
+                id="document-upload"
+              />
+              <label
+                htmlFor="document-upload"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                <Upload className="w-5 h-5" />
+                Choose Document
+              </label>
+              
+              <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl mx-auto">
+                {Object.entries(supportedTypes).map(([type, name]) => (
+                  <div key={type} className="p-3 border border-gray-200 rounded-lg text-center">
+                    <FileText className="w-6 h-6 text-gray-400 mx-auto mb-2" />
+                    <span className="text-xs text-gray-600">{name}</span>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* File Info */}
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <FileText className="w-8 h-8 text-teal-600" />
-                        <div>
-                          <p className="font-medium text-gray-900">{uploadedFile.name}</p>
-                          <p className="text-sm text-gray-600">
-                            {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={resetScanner}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-
-                    {/* Preview */}
-                    {preview ? (
-                      <div className="relative">
-                        <img
-                          src={preview}
-                          alt="Document preview"
-                          className="w-full h-64 object-contain bg-gray-100 rounded-lg border"
-                        />
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <div className="w-full h-32 bg-gray-100 rounded-lg border flex items-center justify-center">
-                          <div className="text-center">
-                            <FileText className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-                            <p className="text-sm text-gray-500">
-                              {uploadedFile.type === 'application/pdf' ? 'PDF Document' : 
-                               uploadedFile.name.toLowerCase().endsWith('.docx') ? 'Word Document' : 
-                               'Document Preview'}
-                            </p>
-                            <p className="text-xs text-gray-400">{uploadedFile.name}</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Scan Button */}
-                    <button
-                      onClick={scanDocument}
-                      disabled={isScanning}
-                      className="w-full bg-teal-600 text-white py-3 px-4 rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
-                    >
-                      {isScanning ? (
-                        <>
-                          <Loader className="w-5 h-5 animate-spin" />
-                          Scanning Document...
-                        </>
-                      ) : (
-                        <>
-                          <Scan className="w-5 h-5" />
-                          Scan Document
-                        </>
-                      )}
-                    </button>
-
-                    {/* Progress Bar */}
-                    {isScanning && (
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div
-                          className="bg-teal-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${scanProgress}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* File Info */}
+              <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-lg">
+                <File className="w-8 h-8 text-blue-600" />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-800">{file.name}</h3>
+                  <p className="text-sm text-gray-600">
+                    {supportedTypes[file.type]} • {(file.size / 1024).toFixed(1)} KB
+                  </p>
+                </div>
+                {!scanning && !extractedData && (
+                  <button
+                    onClick={scanDocument}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Scan with AI
+                  </button>
                 )}
               </div>
-            </div>
 
-            {/* Error Display */}
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-red-50 border border-red-200 rounded-lg p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                  <p className="text-red-700">{error}</p>
+              {/* Scanning Progress */}
+              {scanning && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing with AI...</h3>
+                  <p className="text-gray-600 mb-4">
+                    {scanProgress < 30 ? 'Extracting text from document...' :
+                     scanProgress < 50 ? 'Text extracted, sending to OpenAI...' :
+                     'AI is analyzing and structuring the data...'}
+                  </p>
+                  <div className="w-full max-w-md mx-auto bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${scanProgress}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-2">{scanProgress}% complete</p>
                 </div>
-              </motion.div>
-            )}
+              )}
 
-            {/* Success Display */}
-            {extractedData && !isEditing && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-green-50 border border-green-200 rounded-lg p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  <p className="text-green-700">Document scanned successfully! Review and edit the data below.</p>
+              {/* Error Display */}
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-red-800">Scanning Error</h4>
+                      <p className="text-red-700 text-sm">{error}</p>
+                      {error.includes('API') && (
+                        <button
+                          onClick={() => setShowApiKeyInput(true)}
+                          className="mt-2 text-sm text-red-600 underline hover:text-red-800"
+                        >
+                          Update API Key
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </motion.div>
-            )}
-          </div>
+              )}
 
-          {/* Right Column - Extracted Data Form */}
-          <div className="space-y-6">
-            {(extractedData || isEditing) && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="bg-white rounded-lg border shadow-sm overflow-hidden"
-              >
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-lg font-semibold text-gray-900">Order Details</h2>
-                    <div className="flex items-center gap-2">
+              {/* Results */}
+              {extractedData && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      Data Extracted Successfully
+                    </h3>
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => setIsEditing(!isEditing)}
-                        className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                        title={isEditing ? "View Mode" : "Edit Mode"}
+                        onClick={() => setPreviewMode(previewMode === 'structured' ? 'raw' : 'structured')}
+                        className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
                       >
-                        {isEditing ? <Eye className="w-5 h-5" /> : <Edit className="w-5 h-5" />}
+                        {previewMode === 'structured' ? 'Show Raw Text' : 'Show Structured'}
                       </button>
                     </div>
                   </div>
 
-                  <form className="space-y-6">
-                    {/* Order Information */}
-                    <div>
-                      <h3 className="text-md font-medium text-gray-900 mb-3 flex items-center gap-2">
-                        <FileText className="w-5 h-5 text-teal-600" />
-                        Order Information
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            PO Number
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.poNumber}
-                            onChange={(e) => handleInputChange('poNumber', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                            placeholder="Auto-generated if empty"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Sales Contract
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.salesContract}
-                            onChange={(e) => handleInputChange('salesContract', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Order Date
-                          </label>
-                          <input
-                            type="date"
-                            value={formData.orderDate}
-                            onChange={(e) => handleInputChange('orderDate', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Delivery Date
-                          </label>
-                          <input
-                            type="date"
-                            value={formData.deliveryDate}
-                            onChange={(e) => handleInputChange('deliveryDate', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Reference
-                        </label>
-                        <input
-                          type="text"
-                          value={formData.reference}
-                          onChange={(e) => handleInputChange('reference', e.target.value)}
-                          disabled={!isEditing}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Customer Information */}
-                    <div>
-                      <h3 className="text-md font-medium text-gray-900 mb-3 flex items-center gap-2">
-                        <Building className="w-5 h-5 text-teal-600" />
-                        Customer Information
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="sm:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Company Name
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.customerInfo.companyName}
-                            onChange={(e) => handleInputChange('customerInfo.companyName', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Contact Person
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.customerInfo.contactPerson}
-                            onChange={(e) => handleInputChange('customerInfo.contactPerson', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Email
-                          </label>
-                          <input
-                            type="email"
-                            value={formData.customerInfo.email}
-                            onChange={(e) => handleInputChange('customerInfo.email', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Phone
-                          </label>
-                          <input
-                            type="tel"
-                            value={formData.customerInfo.phone}
-                            onChange={(e) => handleInputChange('customerInfo.phone', e.target.value)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Address
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.customerInfo.address.street}
-                            onChange={(e) => handleInputChange('customerInfo.address.street', e.target.value)}
-                            disabled={!isEditing}
-                            placeholder="Street Address"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50 mb-2"
-                          />
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <input
-                              type="text"
-                              value={formData.customerInfo.address.city}
-                              onChange={(e) => handleInputChange('customerInfo.address.city', e.target.value)}
-                              disabled={!isEditing}
-                              placeholder="City"
-                              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                            />
-                            <input
-                              type="text"
-                              value={formData.customerInfo.address.state}
-                              onChange={(e) => handleInputChange('customerInfo.address.state', e.target.value)}
-                              disabled={!isEditing}
-                              placeholder="State"
-                              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                            />
-                            <input
-                              type="text"
-                              value={formData.customerInfo.address.postcode}
-                              onChange={(e) => handleInputChange('customerInfo.address.postcode', e.target.value)}
-                              disabled={!isEditing}
-                              placeholder="Postcode"
-                              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                            />
-                            <input
-                              type="text"
-                              value={formData.customerInfo.address.country}
-                              onChange={(e) => handleInputChange('customerInfo.address.country', e.target.value)}
-                              disabled={!isEditing}
-                              placeholder="Country"
-                              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                            />
+                  {previewMode === 'structured' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Order Info */}
+                      {(extractedData.poNumber || extractedData.orderDate) && (
+                        <div className="p-4 border border-gray-200 rounded-lg">
+                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-blue-600" />
+                            Order Information
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            {extractedData.poNumber && (
+                              <div><span className="font-medium">PO Number:</span> {extractedData.poNumber}</div>
+                            )}
+                            {extractedData.orderDate && (
+                              <div><span className="font-medium">Order Date:</span> {extractedData.orderDate}</div>
+                            )}
+                            {extractedData.estimatedDelivery && (
+                              <div><span className="font-medium">Delivery Date:</span> {extractedData.estimatedDelivery}</div>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    </div>
+                      )}
 
-                    {/* Product Information */}
-                    {formData.items && formData.items.length > 0 && (
-                      <div>
-                        <h3 className="text-md font-medium text-gray-900 mb-3 flex items-center gap-2">
-                          <Package className="w-5 h-5 text-teal-600" />
-                          Product Information
-                        </h3>
-                        {formData.items.map((item, index) => (
-                          <div key={index} className="border border-gray-200 rounded-lg p-4 mb-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Bar Type
-                                </label>
-                                <input
-                                  type="text"
-                                  value={item.barType}
-                                  onChange={(e) => {
-                                    const newItems = [...formData.items];
-                                    newItems[index].barType = e.target.value;
-                                    setFormData(prev => ({ ...prev, items: newItems }));
-                                  }}
-                                  disabled={!isEditing}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Length (m)
-                                </label>
-                                <input
-                                  type="number"
-                                  value={item.length}
-                                  onChange={(e) => {
-                                    const newItems = [...formData.items];
-                                    newItems[index].length = e.target.value;
-                                    setFormData(prev => ({ ...prev, items: newItems }));
-                                  }}
-                                  disabled={!isEditing}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Quantity/Weight (t)
-                                </label>
-                                <input
-                                  type="number"
-                                  value={item.totalWeight || item.quantity}
-                                  onChange={(e) => {
-                                    const newItems = [...formData.items];
-                                    newItems[index].totalWeight = e.target.value;
-                                    newItems[index].quantity = e.target.value;
-                                    setFormData(prev => ({ ...prev, items: newItems }));
-                                  }}
-                                  disabled={!isEditing}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Price per Tonne
-                                </label>
-                                <input
-                                  type="number"
-                                  value={item.pricePerTonne}
-                                  onChange={(e) => {
-                                    const newItems = [...formData.items];
-                                    newItems[index].pricePerTonne = e.target.value;
-                                    setFormData(prev => ({ ...prev, items: newItems }));
-                                  }}
-                                  disabled={!isEditing}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                                />
-                              </div>
-                              <div className="sm:col-span-2">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Total Price
-                                </label>
-                                <input
-                                  type="number"
-                                  value={item.totalPrice}
-                                  onChange={(e) => {
-                                    const newItems = [...formData.items];
-                                    newItems[index].totalPrice = e.target.value;
-                                    setFormData(prev => ({ ...prev, items: newItems }));
-                                    }}
-                                  disabled={!isEditing}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                                />
-                              </div>
-                            </div>
+                      {/* Customer Info */}
+                      {extractedData.customerInfo && (
+                        <div className="p-4 border border-gray-200 rounded-lg">
+                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                            <Building className="w-4 h-4 text-green-600" />
+                            Customer Information
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            {extractedData.customerInfo.companyName && (
+                              <div><span className="font-medium">Company:</span> {extractedData.customerInfo.companyName}</div>
+                            )}
+                            {extractedData.customerInfo.contactPerson && (
+                              <div><span className="font-medium">Contact:</span> {extractedData.customerInfo.contactPerson}</div>
+                            )}
+                            {extractedData.customerInfo.email && (
+                              <div><span className="font-medium">Email:</span> {extractedData.customerInfo.email}</div>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        </div>
+                      )}
 
-                    {/* Financial Information */}
-                    <div>
-                      <h3 className="text-md font-medium text-gray-900 mb-3 flex items-center gap-2">
-                        <DollarSign className="w-5 h-5 text-teal-600" />
-                        Financial Information
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Subtotal
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={formData.subtotal}
-                            onChange={(e) => {
-                              handleInputChange('subtotal', parseFloat(e.target.value) || 0);
-                              // Auto-calculate GST and total
-                              const subtotal = parseFloat(e.target.value) || 0;
-                              const gst = Math.round(subtotal * 0.1 * 100) / 100;
-                              const total = subtotal + gst;
-                              setFormData(prev => ({
-                                ...prev,
-                                subtotal: subtotal,
-                                gst: gst,
-                                totalAmount: total
-                              }));
-                            }}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            GST (10%)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={formData.gst}
-                            onChange={(e) => handleInputChange('gst', parseFloat(e.target.value) || 0)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50 bg-gray-100"
-                            readOnly
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Total Amount
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={formData.totalAmount}
-                            onChange={(e) => handleInputChange('totalAmount', parseFloat(e.target.value) || 0)}
-                            disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50 font-bold text-lg bg-teal-50"
-                            readOnly
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Assigned Users */}
-                    {formData.assignedUsers && formData.assignedUsers.length > 0 && (
-                      <div>
-                        <h3 className="text-md font-medium text-gray-900 mb-3 flex items-center gap-2">
-                          <User className="w-5 h-5 text-teal-600" />
-                          Assigned Users ({formData.assignedUsers.length})
-                        </h3>
-                        <div className="space-y-2">
-                          {formData.assignedUsers.map((assignedUser, index) => (
-                            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-teal-600 text-white rounded-full flex items-center justify-center text-sm font-medium">
-                                  {assignedUser.name?.charAt(0)?.toUpperCase() || 'U'}
+                      {/* Products */}
+                      {extractedData.products && extractedData.products.length > 0 && (
+                        <div className="md:col-span-2 p-4 border border-gray-200 rounded-lg">
+                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                            <Package className="w-4 h-4 text-purple-600" />
+                            Products ({extractedData.products.length})
+                          </h4>
+                          <div className="space-y-3">
+                            {extractedData.products.map((product, index) => (
+                              <div key={index} className="p-3 bg-gray-50 rounded border">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                                  <div>
+                                    <span className="font-medium">Item:</span> {product.itemCode || 'N/A'}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Product:</span> {product.productName || 'N/A'}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Qty:</span> {product.quantity} × ${product.unitPrice}
+                                  </div>
                                 </div>
-                                <div>
-                                  <p className="font-medium text-gray-900">{assignedUser.name}</p>
-                                  <p className="text-sm text-gray-600">{assignedUser.email}</p>
-                                </div>
+                                {product.description && (
+                                  <p className="text-xs text-gray-600 mt-1">{product.description}</p>
+                                )}
                               </div>
-                              {assignedUser.type === 'self' && (
-                                <span className="px-2 py-1 bg-teal-100 text-teal-800 text-xs rounded-full">
-                                  You
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Notes */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <span className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-teal-600" />
-                          Notes & Instructions
-                        </span>
-                      </label>
-                      <textarea
-                        value={formData.notes}
-                        onChange={(e) => handleInputChange('notes', e.target.value)}
-                        disabled={!isEditing}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-gray-50"
-                        placeholder="Additional notes, delivery instructions, or special requirements..."
-                      />
+                      {/* Financial Info */}
+                      {(extractedData.subtotal || extractedData.total) && (
+                        <div className="p-4 border border-gray-200 rounded-lg">
+                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                            <DollarSign className="w-4 h-4 text-yellow-600" />
+                            Financial Summary
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            {extractedData.subtotal && (
+                              <div><span className="font-medium">Subtotal:</span> ${extractedData.subtotal}</div>
+                            )}
+                            {extractedData.gst && (
+                              <div><span className="font-medium">GST:</span> ${extractedData.gst}</div>
+                            )}
+                            {extractedData.total && (
+                              <div><span className="font-medium">Total:</span> ${extractedData.total}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-
-                    {/* Action Buttons */}
-                    {isEditing && (
-                      <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-200">
+                  ) : (
+                    <div className="p-4 border border-gray-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-medium text-gray-800">Raw Extracted Text</h4>
                         <button
-                          type="button"
-                          onClick={saveOrder}
-                          disabled={isSaving}
-                          className="flex-1 bg-teal-600 text-white py-3 px-6 rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                          onClick={() => copyToClipboard(rawText)}
+                          className="flex items-center gap-1 px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
                         >
-                          {isSaving ? (
-                            <>
-                              <Loader className="w-5 h-5 animate-spin" />
-                              Saving Order...
-                            </>
-                          ) : (
-                            <>
-                              <Save className="w-5 h-5" />
-                              Save Order
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={resetScanner}
-                          className="flex-1 sm:flex-none px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-                        >
-                          <span className="flex items-center justify-center gap-2">
-                            <X className="w-5 h-5" />
-                            Cancel
-                          </span>
+                          <Copy className="w-3 h-3" />
+                          Copy
                         </button>
                       </div>
-                    )}
+                      <pre className="text-xs text-gray-600 bg-gray-50 p-3 rounded max-h-96 overflow-y-auto whitespace-pre-wrap">
+                        {rawText}
+                      </pre>
+                    </div>
+                  )}
 
-                    {/* View Mode Info */}
-                    {!isEditing && extractedData && (
-                      <div className="pt-6 border-t border-gray-200">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Eye className="w-5 h-5 text-blue-600" />
-                            <p className="font-medium text-blue-800">View Mode</p>
-                          </div>
-                          <p className="text-blue-700 text-sm">
-                            Click the edit button above to modify the extracted data before saving.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </form>
+                  {/* Apply Button */}
+                  <div className="flex justify-center pt-4">
+                    <button
+                      onClick={applyExtractedData}
+                      className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      <CheckCircle className="w-5 h-5" />
+                      Apply to Order Form
+                    </button>
+                  </div>
                 </div>
-              </motion.div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Footer Information */}
-        <div className="mt-8 text-center">
-          <div className="bg-white rounded-lg border shadow-sm p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-2">How Document Scanner Works</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-gray-600">
-              <div className="flex flex-col items-center">
-                <Upload className="w-8 h-8 text-teal-600 mb-2" />
-                <h4 className="font-medium text-gray-900 mb-1">1. Upload Document</h4>
-                <p>Upload your purchase order, invoice, or quote (PDF, Word, or image formats supported)</p>
-              </div>
-              <div className="flex flex-col items-center">
-                <Scan className="w-8 h-8 text-teal-600 mb-2" />
-                <h4 className="font-medium text-gray-900 mb-1">2. AI Extraction</h4>
-                <p>Our AI automatically extracts customer info, product details, and pricing from your document</p>
-              </div>
-              <div className="flex flex-col items-center">
-                <Edit className="w-8 h-8 text-teal-600 mb-2" />
-                <h4 className="font-medium text-gray-900 mb-1">3. Review & Save</h4>
-                <p>Review the extracted data, make any necessary edits, and save as a new order</p>
-              </div>
+        {/* Footer */}
+        <div className="p-6 border-t border-gray-200">
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-gray-500">
+              {file ? `Selected: ${file.name}` : 'No file selected'}
             </div>
-
-            {/* Additional Features */}
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h4 className="font-medium text-gray-900 mb-3">Supported Features</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>PDF Documents</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Word Documents</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Image Files</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Auto Calculations</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Multi-User Orders</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Steel Specifications</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Australian GST</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span>Data Validation</span>
-                </div>
-              </div>
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              {file && !extractedData && !scanning && (
+                <button
+                  onClick={() => {
+                    setFile(null);
+                    setError(null);
+                    setRawText('');
+                    setScanProgress(0);
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Choose Different File
+                </button>
+              )}
+              {extractedData && (
+                <button
+                  onClick={applyExtractedData}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Apply Data
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+};
+
+// Enhanced AddOrderComponent with Document Scanner Integration
+const AddOrderComponentWithScanner = () => {
+  const [showDocumentScanner, setShowDocumentScanner] = useState(false);
+  const [orderForm, setOrderForm] = useState({
+    // ... (keep existing orderForm state)
+  });
+  const [products, setProducts] = useState([{
+    // ... (keep existing products state)
+  }]);
+
+  // Handle data extracted from document scanner
+  const handleDocumentDataExtracted = (extractedData) => {
+    console.log('Extracted data:', extractedData);
+    
+    // Update order form with extracted data
+    if (extractedData.poNumber) {
+      setOrderForm(prev => ({ ...prev, poNumber: extractedData.poNumber }));
+    }
+    
+    if (extractedData.orderDate) {
+      setOrderForm(prev => ({ ...prev, orderDate: extractedData.orderDate }));
+    }
+    
+    if (extractedData.estimatedDelivery) {
+      setOrderForm(prev => ({ ...prev, estimatedDelivery: extractedData.estimatedDelivery }));
+    }
+    
+    if (extractedData.reference) {
+      setOrderForm(prev => ({ ...prev, reference: extractedData.reference }));
+    }
+    
+    if (extractedData.notes) {
+      setOrderForm(prev => ({ ...prev, notes: extractedData.notes }));
+    }
+
+    // Update customer info
+    if (extractedData.customerInfo) {
+      setOrderForm(prev => ({
+        ...prev,
+        customerInfo: {
+          ...prev.customerInfo,
+          ...extractedData.customerInfo
+        }
+      }));
+    }
+
+    // Update delivery address
+    if (extractedData.deliveryAddress) {
+      setOrderForm(prev => ({
+        ...prev,
+        deliveryAddress: {
+          ...prev.deliveryAddress,
+          ...extractedData.deliveryAddress
+        }
+      }));
+    }
+
+    // Update terms
+    if (extractedData.paymentTerms) {
+      setOrderForm(prev => ({ ...prev, paymentTerms: extractedData.paymentTerms }));
+    }
+    
+    if (extractedData.deliveryTerms) {
+      setOrderForm(prev => ({ ...prev, deliveryTerms: extractedData.deliveryTerms }));
+    }
+    
+    if (extractedData.documentation) {
+      setOrderForm(prev => ({ ...prev, documentation: extractedData.documentation }));
+    }
+    
+    if (extractedData.quantityTolerance) {
+      setOrderForm(prev => ({ ...prev, quantityTolerance: extractedData.quantityTolerance }));
+    }
+
+    // Update products
+    if (extractedData.products && extractedData.products.length > 0) {
+      const newProducts = extractedData.products.map((product, index) => ({
+        id: Date.now() + index,
+        itemCode: product.itemCode || '',
+        productName: product.productName || '',
+        description: product.description || '',
+        category: product.category || 'Steel Products',
+        material: product.material || 'AS/NZS 4671:2019',
+        dimensions: {
+          length: product.dimensions?.length || '',
+          width: product.dimensions?.width || '',
+          height: product.dimensions?.height || '',
+          diameter: product.dimensions?.diameter || '',
+          thickness: product.dimensions?.thickness || '',
+          unit: product.dimensions?.unit || 'mm'
+        },
+        weight: product.weight || '',
+        finish: product.finish || 'Raw/Mill Finish',
+        specifications: product.specifications || [],
+        tags: product.tags || [],
+        isACRSCertified: product.isACRSCertified || false,
+        unitPrice: product.unitPrice || '',
+        pricePerUnit: product.pricePerUnit || 'each',
+        currency: product.currency || 'AUD',
+        quantity: product.quantity || 1
+      }));
+      
+      setProducts(newProducts);
+    }
+
+    // Show success message
+    alert(`Document scanned successfully! Extracted ${extractedData.products?.length || 0} products and populated order form.`);
+  };
+
+  return (
+    <>
+      {/* Document Scanner Modal */}
+      {showDocumentScanner && (
+        <DocumentScanner
+          onDataExtracted={handleDocumentDataExtracted}
+          onClose={() => setShowDocumentScanner(false)}
+        />
+      )}
+
+      {/* Your existing AddOrderComponent JSX here */}
+      {/* Add the document scanner button in the header or appropriate location */}
+      <div className="flex items-center gap-3 mb-6">
+        <button
+          onClick={() => setShowDocumentScanner(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-lg"
+        >
+          <Brain className="w-5 h-5" />
+          Scan Document with AI
+        </button>
+        
+        <div className="text-sm text-gray-500">
+          Upload PDF, Word, or image files to auto-fill order details
+        </div>
+      </div>
+      
+      {/* Rest of your existing component */}
+    </>
   );
 };
 
