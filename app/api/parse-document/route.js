@@ -2,6 +2,8 @@ import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { z } from 'zod';
 
+export const maxDuration = 30;
+
 // Define the schema for validation
 const DocumentParseSchema = z.object({
   orderInfo: z.object({
