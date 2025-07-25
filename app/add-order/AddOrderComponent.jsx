@@ -3505,6 +3505,39 @@ return (
               </button>
             </div>
           )}
+           {step === 3 && (
+             <div className="p-6 border-t border-gray-200 flex justify-between">
+               <button
+                 onClick={() => {
+                   // Skip adding products and proceed with order creation
+                   setProductsToAdd([]);
+                   handleProductCheckComplete();
+                 }}
+                 className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                 disabled={loading || addingProducts}
+               >
+                 Skip & Continue
+               </button>
+               
+               <button
+                 onClick={handleProductCheckComplete}
+                 disabled={loading || addingProducts}
+                 className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+               >
+                 {loading || addingProducts ? (
+                   <>
+                     <Loader className="w-4 h-4 animate-spin" />
+                     {addingProducts ? 'Adding Products...' : 'Creating Order...'}
+                   </>
+                 ) : (
+                   <>
+                     <Save className="w-4 h-4" />
+                     {productsToAdd.length > 0 ? `Add ${productsToAdd.length} Product${productsToAdd.length !== 1 ? 's' : ''} & Create Order` : 'Create Order'}
+                   </>
+                 )}
+               </button>
+             </div>
+           )}
         </motion.div>
       </div>
     )}
