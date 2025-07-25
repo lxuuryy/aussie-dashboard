@@ -72,6 +72,99 @@ const InvoiceManagement = () => {
   });
   const [submittingTracking, setSubmittingTracking] = useState(false);
 
+  // Helper function to safely render customer info
+  // Helper function to safely render customer info
+const getCustomerDisplayName = (customerInfo) => {
+  if (!customerInfo) return 'Unknown Company';
+  
+  // Handle if customerInfo itself is a string
+  if (typeof customerInfo === 'string') return customerInfo;
+  
+  // Handle nested companyName object structure
+  if (customerInfo.companyName) {
+    if (typeof customerInfo.companyName === 'string') {
+      return customerInfo.companyName;
+    }
+    // If companyName is an object, get the companyName property from it
+    if (typeof customerInfo.companyName === 'object' && customerInfo.companyName.companyName) {
+      return customerInfo.companyName.companyName;
+    }
+  }
+  
+  return 'Unknown Company';
+};
+
+const getCustomerContactPerson = (customerInfo) => {
+  if (!customerInfo || typeof customerInfo === 'string') return '';
+  
+  // Check direct contactPerson field first
+  if (customerInfo.contactPerson) return customerInfo.contactPerson;
+  
+  // Check nested companyName object
+  if (customerInfo.companyName && typeof customerInfo.companyName === 'object') {
+    return customerInfo.companyName.contactPerson || '';
+  }
+  
+  return '';
+};
+
+const getCustomerEmail = (customerInfo) => {
+  if (!customerInfo || typeof customerInfo === 'string') return '';
+  
+  // Check direct email field first
+  if (customerInfo.email) return customerInfo.email;
+  
+  // Check nested companyName object
+  if (customerInfo.companyName && typeof customerInfo.companyName === 'object') {
+    return customerInfo.companyName.email || '';
+  }
+  
+  return '';
+};
+
+const getCustomerPhone = (customerInfo) => {
+  if (!customerInfo || typeof customerInfo === 'string') return '';
+  
+  // Check direct phone field first
+  if (customerInfo.phone) return customerInfo.phone;
+  
+  // Check nested companyName object
+  if (customerInfo.companyName && typeof customerInfo.companyName === 'object') {
+    return customerInfo.companyName.phone || '';
+  }
+  
+  return '';
+};
+
+const getCustomerAddress = (customerInfo) => {
+  if (!customerInfo || typeof customerInfo === 'string') return '';
+  
+  // Check direct address field first
+  if (customerInfo.address) {
+    if (typeof customerInfo.address === 'string') return customerInfo.address;
+    if (customerInfo.address.fullAddress) return customerInfo.address.fullAddress;
+    // Construct address from parts
+    const parts = [
+      customerInfo.address.street,
+      customerInfo.address.city,
+      customerInfo.address.state,
+      customerInfo.address.postcode
+    ].filter(Boolean);
+    return parts.join(', ');
+  }
+  
+  // Check nested companyName object
+  if (customerInfo.companyName && typeof customerInfo.companyName === 'object' && customerInfo.companyName.address) {
+    const addr = customerInfo.companyName.address;
+    if (typeof addr === 'string') return addr;
+    if (addr.fullAddress) return addr.fullAddress;
+    const parts = [addr.street, addr.city, addr.state, addr.postcode].filter(Boolean);
+    return parts.join(', ');
+  }
+  
+  return '';
+};
+
   // Helper function to parse your custom date format or Firestore Timestamps
   const parseCustomDate = (dateValue) => {
     if (!dateValue) return null;
@@ -189,8 +282,8 @@ const InvoiceManagement = () => {
     if (searchTerm) {
       filtered = filtered.filter(invoice =>
         invoice.poNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        invoice.customerInfo?.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        invoice.customerInfo?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        getCustomerDisplayName(invoice.customerInfo)?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        getCustomerEmail(invoice.customerInfo)?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         invoice.salesContract?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
@@ -246,7 +339,7 @@ const InvoiceManagement = () => {
         case 'amount-asc':
           return (a.totalAmount || 0) - (b.totalAmount || 0);
         case 'company':
-          return (a.customerInfo?.companyName || '').localeCompare(b.customerInfo?.companyName || '');
+          return getCustomerDisplayName(a.customerInfo).localeCompare(getCustomerDisplayName(b.customerInfo));
         default:
           return 0;
       }
@@ -586,13 +679,13 @@ const InvoiceManagement = () => {
                           <TableCell>
                             <div>
                               <div className="font-medium text-gray-900">
-                                {invoice.customerInfo?.companyName || 'Unknown Company'}
+                                {getCustomerDisplayName(invoice.customerInfo)}
                               </div>
                               <div className="text-sm text-gray-600">
-                                {invoice.customerInfo?.contactPerson}
+                                {getCustomerContactPerson(invoice.customerInfo)}
                               </div>
                               <div className="text-sm text-gray-500">
-                                {invoice.customerInfo?.email}
+                                {getCustomerEmail(invoice.customerInfo)}
                               </div>
                             </div>
                           </TableCell>
@@ -657,47 +750,47 @@ const InvoiceManagement = () => {
                                 <Edit className="w-4 h-4" />
                               </Button>
                               {invoice.proformaInvoiceUrl ? (
-  <Button
-    variant="ghost"
-    size="sm"
-    onClick={() => window.open(invoice.proformaInvoiceUrl, '_blank')}
-    title="View Proforma Invoice"
-    className="text-green-600 hover:text-green-700"
-  >
-    <Eye className="w-4 h-4" />
-  </Button>
-) : (
-  <Button
-    variant="ghost"
-    size="sm"
-    onClick={() => openPerformaInvoice(invoice)}
-    title="Generate Proforma Invoice"
-    className="text-amber-600 hover:text-amber-700"
-  >
-    <AlertCircle className="w-4 h-4" />
-  </Button>
-)}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(invoice.proformaInvoiceUrl, '_blank')}
+                                  title="View Proforma Invoice"
+                                  className="text-green-600 hover:text-green-700"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openPerformaInvoice(invoice)}
+                                  title="Generate Proforma Invoice"
+                                  className="text-amber-600 hover:text-amber-700"
+                                >
+                                  <AlertCircle className="w-4 h-4" />
+                                </Button>
+                              )}
                               {invoice.contractUrl ? (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => window.open(invoice.contractUrl, '_blank')}
-        title="View Sales Contract"
-        className="text-green-600 hover:text-green-700"
-      >
-        <Eye className="w-4 h-4" />
-      </Button>
-    ) : (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => openContractEditor(invoice)}
-        title="Generate Sales Contract"
-        className="text-amber-600 hover:text-amber-700"
-      >
-        <AlertCircle className="w-4 h-4" />
-      </Button>
-    )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(invoice.contractUrl, '_blank')}
+                                  title="View Sales Contract"
+                                  className="text-green-600 hover:text-green-700"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openContractEditor(invoice)}
+                                  title="Generate Sales Contract"
+                                  className="text-amber-600 hover:text-amber-700"
+                                >
+                                  <AlertCircle className="w-4 h-4" />
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -748,301 +841,301 @@ const InvoiceManagement = () => {
                             )}
                           </div>
                           <div className="text-sm text-gray-600 mb-1">
-                            {invoice.customerInfo?.companyName || 'Unknown Company'}
+                            {getCustomerDisplayName(invoice.customerInfo)}
                           </div>
                           <div className="text-lg font-bold text-gray-900">
-                            {formatCurrency(invoice.totalAmount)}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-sm text-gray-500">
-                            {formatDate(invoice.createdAt || invoice.orderDate)}
-                          </div>
-                          {isExpanded ? (
-                            <ChevronDown className="w-5 h-5 text-gray-400" />
-                          ) : (
-                            <ChevronRight className="w-5 h-5 text-gray-400" />
-                          )}
-                        </div>
-                      </div>
+                           {formatCurrency(invoice.totalAmount)}
+                         </div>
+                       </div>
+                       <div className="flex items-center gap-2">
+                         <div className="text-sm text-gray-500">
+                           {formatDate(invoice.createdAt || invoice.orderDate)}
+                         </div>
+                         {isExpanded ? (
+                           <ChevronDown className="w-5 h-5 text-gray-400" />
+                         ) : (
+                           <ChevronRight className="w-5 h-5 text-gray-400" />
+                         )}
+                       </div>
+                     </div>
 
-                      {/* Expanded Details */}
-                      {isExpanded && (
-                        <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">
-                          {/* Customer Details */}
-                          <div>
-                            <h4 className="text-sm font-medium text-gray-900 mb-2">Customer Details</h4>
-                            <div className="text-sm text-gray-600 space-y-1">
-                              <div>Contact: {invoice.customerInfo?.contactPerson}</div>
-                              <div>Email: {invoice.customerInfo?.email}</div>
-                            </div>
-                          </div>
-
-                          {/* Product Details */}
-                          <div>
-                            <h4 className="text-sm font-medium text-gray-900 mb-2">Product Details</h4>
-                            <div className="text-sm text-gray-600 space-y-1">
-                              <div>Type: {invoice.items?.[0]?.barType} × {invoice.items?.[0]?.length}m</div>
-                              <div>Weight: {invoice.items?.[0]?.totalWeight || invoice.items?.[0]?.quantity}t</div>
-                              <div>Price: {formatCurrency(invoice.items?.[0]?.pricePerTonne || 0)}/t</div>
-                              {invoice.salesContract && (
-                                <div>Contract: {invoice.salesContract}</div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Amount Details */}
-                          <div>
-                            <h4 className="text-sm font-medium text-gray-900 mb-2">Amount Details</h4>
-                            <div className="text-sm text-gray-600 space-y-1">
-                             <div>Subtotal: {formatCurrency((invoice.totalAmount || 0) - (invoice.gst || 0))}</div>
-                             <div>GST: {formatCurrency(invoice.gst || 0)}</div>
-                             <div className="font-semibold text-gray-900">Total: {formatCurrency(invoice.totalAmount || 0)}</div>
+                     {/* Expanded Details */}
+                     {isExpanded && (
+                       <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">
+                         {/* Customer Details */}
+                         <div>
+                           <h4 className="text-sm font-medium text-gray-900 mb-2">Customer Details</h4>
+                           <div className="text-sm text-gray-600 space-y-1">
+                             <div>Contact: {getCustomerContactPerson(invoice.customerInfo)}</div>
+                             <div>Email: {getCustomerEmail(invoice.customerInfo)}</div>
                            </div>
                          </div>
 
-                         {/* Delivery Info */}
-                         {invoice.estimatedDelivery && (
-                           <div>
-                             <h4 className="text-sm font-medium text-gray-900 mb-2">Delivery</h4>
-                             <div className="text-sm text-gray-600">
-                               Estimated: {formatDate(invoice.estimatedDelivery)}
-                             </div>
-                           </div>
-                         )}
-
-                         {/* Actions */}
+                         {/* Product Details */}
                          <div>
-                           <h4 className="text-sm font-medium text-gray-900 mb-2">Actions</h4>
-                           <div className="flex flex-wrap gap-2">
-                             {invoice.pdfUrl ? (
-                               <Button
-                                 variant="outline"
-                                 size="sm"
-                                 onClick={() => openInvoicePDF(invoice)}
-                               >
-                                 <Eye className="w-4 h-4 mr-2" />
-                                 View PDF
-                               </Button>
-                             ) : (
-                               <Badge variant="secondary">
-                                 No PDF Available
-                               </Badge>
+                           <h4 className="text-sm font-medium text-gray-900 mb-2">Product Details</h4>
+                           <div className="text-sm text-gray-600 space-y-1">
+                             <div>Type: {invoice.items?.[0]?.barType} × {invoice.items?.[0]?.length}m</div>
+                             <div>Weight: {invoice.items?.[0]?.totalWeight || invoice.items?.[0]?.quantity}t</div>
+                             <div>Price: {formatCurrency(invoice.items?.[0]?.pricePerTonne || 0)}/t</div>
+                             {invoice.salesContract && (
+                               <div>Contract: {invoice.salesContract}</div>
                              )}
+                           </div>
+                         </div>
 
-                            {invoice.proformaInvoiceUrl ? (
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => window.open(invoice.proformaInvoiceUrl, '_blank')}
-    className="text-green-600 border-green-200 hover:bg-green-50"
-  >
-    <Eye className="w-4 h-4 mr-2" />
-    View Proforma
-  </Button>
-) : (
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => openPerformaInvoice(invoice)}
-    className="text-amber-600 border-amber-200 hover:bg-amber-50"
-  >
-    <AlertCircle className="w-4 h-4 mr-2" />
-    Generate Proforma
-  </Button>
-)}
-                             
-                             {invoice.contractUrl ? (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => window.open(invoice.contractUrl, '_blank')}
-        className="text-green-600 border-green-200 hover:bg-green-50"
-      >
-        <Eye className="w-4 h-4 mr-2" />
-        View Contract
-      </Button>
-    ) : (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => openContractEditor(invoice)}
-        className="text-amber-600 border-amber-200 hover:bg-amber-50"
-      >
-        <AlertCircle className="w-4 h-4 mr-2" />
-        Generate Contract
-      </Button>
-    )}
-                             
+                         {/* Amount Details */}
+                         <div>
+                           <h4 className="text-sm font-medium text-gray-900 mb-2">Amount Details</h4>
+                           <div className="text-sm text-gray-600 space-y-1">
+                            <div>Subtotal: {formatCurrency((invoice.totalAmount || 0) - (invoice.gst || 0))}</div>
+                            <div>GST: {formatCurrency(invoice.gst || 0)}</div>
+                            <div className="font-semibold text-gray-900">Total: {formatCurrency(invoice.totalAmount || 0)}</div>
+                          </div>
+                        </div>
+
+                        {/* Delivery Info */}
+                        {invoice.estimatedDelivery && (
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-900 mb-2">Delivery</h4>
+                            <div className="text-sm text-gray-600">
+                              Estimated: {formatDate(invoice.estimatedDelivery)}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-900 mb-2">Actions</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {invoice.pdfUrl ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openInvoicePDF(invoice)}
+                              >
+                                <Eye className="w-4 h-4 mr-2" />
+                                View PDF
+                              </Button>
+                            ) : (
+                              <Badge variant="secondary">
+                                No PDF Available
+                              </Badge>
+                            )}
+
+                           {invoice.proformaInvoiceUrl ? (
                              <Button
                                variant="outline"
                                size="sm"
-                               onClick={() => router.push(`/orders/tracker/${invoice.poNumber}`)}
+                               onClick={() => window.open(invoice.proformaInvoiceUrl, '_blank')}
+                               className="text-green-600 border-green-200 hover:bg-green-50"
                              >
-                               <Truck className="w-4 h-4 mr-2" />
-                               Track Order
+                               <Eye className="w-4 h-4 mr-2" />
+                               View Proforma
                              </Button>
-                             
-                             {invoice.contractUrl && (
-                               <Button
-                                 variant="outline"
-                                 size="sm"
-                                 onClick={() => window.open(invoice.contractUrl, '_blank')}
-                               >
-                                 <ExternalLink className="w-4 h-4 mr-2" />
-                                 View Contract
-                               </Button>
-                             )}
-                           </div>
-                         </div>
-                       </div>
-                     )}
-                   </div>
-                 );
-               })}
-             </div>
-           </>
-         )}
-       </Card>
-       
-       {/* Sales Contract Generator Modal */}
-       {showContractGenerator && selectedOrderForContract && (
-         <SalesContractGenerator 
-           order={selectedOrderForContract}
-           onClose={closeSalesContractGenerator}
-         />
-       )}
+                           ) : (
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => openPerformaInvoice(invoice)}
+                               className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                             >
+                               <AlertCircle className="w-4 h-4 mr-2" />
+                               Generate Proforma
+                             </Button>
+                           )}
+                            
+                            {invoice.contractUrl ? (
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => window.open(invoice.contractUrl, '_blank')}
+                               className="text-green-600 border-green-200 hover:bg-green-50"
+                             >
+                               <Eye className="w-4 h-4 mr-2" />
+                               View Contract
+                             </Button>
+                           ) : (
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => openContractEditor(invoice)}
+                               className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                             >
+                               <AlertCircle className="w-4 h-4 mr-2" />
+                               Generate Contract
+                             </Button>
+                           )}
+                            
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => router.push(`/orders/tracker/${invoice.poNumber}`)}
+                            >
+                              <Truck className="w-4 h-4 mr-2" />
+                              Track Order
+                            </Button>
+                            
+                            {invoice.contractUrl && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(invoice.contractUrl, '_blank')}
+                              >
+                                <ExternalLink className="w-4 h-4 mr-2" />
+                                View Contract
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Card>
+      
+      {/* Sales Contract Generator Modal */}
+      {showContractGenerator && selectedOrderForContract && (
+        <SalesContractGenerator 
+          order={selectedOrderForContract}
+          onClose={closeSalesContractGenerator}
+        />
+      )}
 
-       {/* Order Tracking Modal */}
-       <Dialog open={showTrackingModal} onOpenChange={setShowTrackingModal}>
-         <DialogContent className="max-w-md">
-           <DialogHeader>
-             <DialogTitle>Update Order Tracking</DialogTitle>
-           </DialogHeader>
+      {/* Order Tracking Modal */}
+      <Dialog open={showTrackingModal} onOpenChange={setShowTrackingModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Update Order Tracking</DialogTitle>
+          </DialogHeader>
 
-           {selectedOrderForTracking && (
-             <div className="space-y-4">
-               <Alert>
-                 <AlertDescription>
-                   <div className="space-y-1">
-                     <div>Order: <span className="font-medium">{selectedOrderForTracking.poNumber}</span></div>
-                     <div>Customer: <span className="font-medium">{selectedOrderForTracking.customerInfo?.companyName}</span></div>
-                   </div>
-                 </AlertDescription>
-               </Alert>
+          {selectedOrderForTracking && (
+            <div className="space-y-4">
+              <Alert>
+                <AlertDescription>
+                  <div className="space-y-1">
+                    <div>Order: <span className="font-medium">{selectedOrderForTracking.poNumber}</span></div>
+                    <div>Customer: <span className="font-medium">{getCustomerDisplayName(selectedOrderForTracking.customerInfo)}</span></div>
+                  </div>
+                </AlertDescription>
+              </Alert>
 
-               <form onSubmit={handleTrackingSubmit} className="space-y-4">
-                 <div>
-                   <Label htmlFor="status">Order Status *</Label>
-                   <Select 
-                     value={trackingData.status} 
-                     onValueChange={(value) => setTrackingData(prev => ({...prev, status: value}))}
-                     required
-                   >
-                     <SelectTrigger>
-                       <SelectValue placeholder="Select status..." />
-                     </SelectTrigger>
-                     <SelectContent>
-                       <SelectItem value="pending">Pending</SelectItem>
-                       <SelectItem value="confirmed">Confirmed</SelectItem>
-                       <SelectItem value="processing">Processing</SelectItem>
-                       <SelectItem value="shipped">Shipped</SelectItem>
-                       <SelectItem value="delivered">Delivered</SelectItem>
-                       <SelectItem value="completed">Completed</SelectItem>
-                       <SelectItem value="cancelled">Cancelled</SelectItem>
-                     </SelectContent>
-                   </Select>
-                 </div>
+              <form onSubmit={handleTrackingSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="status">Order Status *</Label>
+                  <Select 
+                    value={trackingData.status} 
+                    onValueChange={(value) => setTrackingData(prev => ({...prev, status: value}))}
+                    required
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select status..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="processing">Processing</SelectItem>
+                      <SelectItem value="shipped">Shipped</SelectItem>
+                      <SelectItem value="delivered">Delivered</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                 <div>
-                   <Label htmlFor="location">Location *</Label>
-                   <Input
-                     id="location"
-                     type="text"
-                     value={trackingData.location}
-                     onChange={(e) => setTrackingData(prev => ({...prev, location: e.target.value}))}
-                     placeholder="e.g., Sydney Warehouse, Melbourne Distribution Center"
-                     required
-                   />
-                 </div>
+                <div>
+                  <Label htmlFor="location">Location *</Label>
+                  <Input
+                    id="location"
+                    type="text"
+                    value={trackingData.location}
+                    onChange={(e) => setTrackingData(prev => ({...prev, location: e.target.value}))}
+                    placeholder="e.g., Sydney Warehouse, Melbourne Distribution Center"
+                    required
+                  />
+                </div>
 
-                 <div>
-                   <Label htmlFor="timestamp">Timestamp *</Label>
-                   <Input
-                     id="timestamp"
-                     type="datetime-local"
-                     value={trackingData.timestamp}
-                     onChange={(e) => setTrackingData(prev => ({...prev, timestamp: e.target.value}))}
-                     required
-                   />
-                 </div>
+                <div>
+                  <Label htmlFor="timestamp">Timestamp *</Label>
+                  <Input
+                    id="timestamp"
+                    type="datetime-local"
+                    value={trackingData.timestamp}
+                    onChange={(e) => setTrackingData(prev => ({...prev, timestamp: e.target.value}))}
+                    required
+                  />
+                </div>
 
-                 <div>
-                   <Label htmlFor="note">Note (Optional)</Label>
-                   <Textarea
-                     id="note"
-                     value={trackingData.note}
-                     onChange={(e) => setTrackingData(prev => ({...prev, note: e.target.value}))}
-                     placeholder="Additional tracking information..."
-                     rows={3}
-                   />
-                 </div>
+                <div>
+                  <Label htmlFor="note">Note (Optional)</Label>
+                  <Textarea
+                    id="note"
+                    value={trackingData.note}
+                    onChange={(e) => setTrackingData(prev => ({...prev, note: e.target.value}))}
+                    placeholder="Additional tracking information..."
+                    rows={3}
+                  />
+                </div>
 
-                 <div className="flex gap-3 pt-4">
-                   <Button
-                     type="button"
-                     variant="outline"
-                     onClick={closeTrackingModal}
-                     className="flex-1"
-                   >
-                     Cancel
-                   </Button>
-                   <Button
-                     type="submit"
-                     disabled={submittingTracking}
-                     className="flex-1"
-                   >
-                     {submittingTracking ? (
-                       <>
-                         <Loader className="w-4 h-4 mr-2 animate-spin" />
-                         Adding...
-                       </>
-                     ) : (
-                       <>
-                         <Save className="w-4 h-4 mr-2" />
-                         Add Tracking
-                       </>
-                     )}
-                   </Button>
-                 </div>
-               </form>
+                <div className="flex gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={closeTrackingModal}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={submittingTracking}
+                    className="flex-1"
+                  >
+                    {submittingTracking ? (
+                      <>
+                        <Loader className="w-4 h-4 mr-2 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 mr-2" />
+                        Add Tracking
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
 
-               {/* Show existing tracking points */}
-               {selectedOrderForTracking.trackingPoints && selectedOrderForTracking.trackingPoints.length > 0 && (
-                 <div className="pt-4 border-t border-gray-200">
-                   <h3 className="text-sm font-medium text-gray-900 mb-3">Recent Tracking History</h3>
-                   <div className="space-y-2 max-h-40 overflow-y-auto">
-                     {selectedOrderForTracking.trackingPoints.slice(-3).reverse().map((point, index) => (
-                       <div key={index} className="text-xs bg-gray-50 p-2 rounded">
-                         <div className="flex items-center gap-2">
-                           <Badge variant="outline" className="text-xs capitalize">{point.status}</Badge>
-                           <span className="text-gray-600">{point.location}</span>
-                         </div>
-                         <div className="text-gray-500 mt-1">
-                           {formatDate(point.timestamp?.toDate ? point.timestamp.toDate() : point.timestamp)}
-                         </div>
-                       </div>
-                     ))}
-                   </div>
-                 </div>
-               )}
-             </div>
-           )}
-         </DialogContent>
-       </Dialog>
-     </div>
-   </div>
- );
+              {/* Show existing tracking points */}
+              {selectedOrderForTracking.trackingPoints && selectedOrderForTracking.trackingPoints.length > 0 && (
+                <div className="pt-4 border-t border-gray-200">
+                  <h3 className="text-sm font-medium text-gray-900 mb-3">Recent Tracking History</h3>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {selectedOrderForTracking.trackingPoints.slice(-3).reverse().map((point, index) => (
+                      <div key={index} className="text-xs bg-gray-50 p-2 rounded">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs capitalize">{point.status}</Badge>
+                          <span className="text-gray-600">{point.location}</span>
+                        </div>
+                        <div className="text-gray-500 mt-1">
+                          {formatDate(point.timestamp?.toDate ? point.timestamp.toDate() : point.timestamp)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  </div>
+);
 };
 
 export default InvoiceManagement;
