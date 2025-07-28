@@ -235,7 +235,7 @@ export default function VesselDashboard() {
                   <CardDescription>Real-time vessel tracking across Newcastle and Sydney</CardDescription>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col  gap-3">
                 <Select value={selectedPort} onValueChange={(value: 'both' | 'newcastle' | 'sydney') => setSelectedPort(value)}>
                   <SelectTrigger className="w-40">
                     <SelectValue />
