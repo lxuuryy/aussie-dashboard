@@ -1,322 +1,448 @@
-'use client'
 import React, { useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Upload, 
-  Scan, 
   FileText, 
-  Eye, 
-  Loader2, 
+  Scan, 
   CheckCircle, 
-  AlertCircle, 
-  Download,
-  RefreshCw,
-  Zap,
-  FileImage,
-  File,
+  AlertCircle,
+  Loader,
   X,
-  Brain,
-  Sparkles,
-  Search,
-  Copy,
-  Edit3,
-  Package,
-  DollarSign,
-  Calendar,
-  Building,
-  User,
-  Mail,
-  Phone,
-  MapPin
+  Zap,
+  Bot,
+  Download,
+  Eye,
+  RefreshCw
 } from 'lucide-react';
 import * as mammoth from 'mammoth';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
-const DocumentScanner = ({ onDataExtracted, onClose }) => {
-  const [file, setFile] = useState(null);
+// Document Scanner Component - FIXED VERSION
+const DocumentScanner = ({ onDataExtracted, onSkip, companyData }) => {
+  const [uploadedFile, setUploadedFile] = useState(null);
   const [scanning, setScanning] = useState(false);
-  const [extractedData, setExtractedData] = useState(null);
-  const [rawText, setRawText] = useState('');
-  const [error, setError] = useState(null);
   const [scanProgress, setScanProgress] = useState(0);
-  const [previewMode, setPreviewMode] = useState('structured');
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [extractedData, setExtractedData] = useState(null);
+  const [error, setError] = useState(null);
+  const [processingStep, setProcessingStep] = useState('');
+  const [rawExtractedText, setRawExtractedText] = useState('');
+  const [showRawText, setShowRawText] = useState(false);
 
   // Supported file types
   const supportedTypes = {
     'application/pdf': 'PDF Document',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word Document',
-    'application/msword': 'Word Document (Legacy)',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word Document (DOCX)',
+    'application/msword': 'Word Document (DOC)',
     'text/plain': 'Text File',
-    'image/jpeg': 'JPEG Image',
-    'image/png': 'PNG Image',
-    'image/webp': 'WebP Image',
-    'text/html': 'HTML Document'
+    'text/csv': 'CSV File',
+    'application/vnd.ms-excel': 'Excel File',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel File (XLSX)'
   };
 
-  // Extract text from PDF using pdf-parse alternative
-  const extractTextFromPDF = async (file) => {
-    try {
-      // Load PDF.js from CDN
-      if (!window.pdfjsLib) {
+  // FIXED: Better PDF.js loader with error handling
+  const loadPDFJS = async () => {
+    if (typeof window !== 'undefined' && window.pdfjsLib) {
+      return window.pdfjsLib;
+    }
+    
+    return new Promise((resolve, reject) => {
+      try {
         const script = document.createElement('script');
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        script.onload = () => {
+          try {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            resolve(window.pdfjsLib);
+          } catch (e) {
+            reject(new Error('Failed to initialize PDF.js worker'));
+          }
+        };
+        script.onerror = () => reject(new Error('Failed to load PDF.js library'));
         document.head.appendChild(script);
-        
-        await new Promise((resolve) => {
-          script.onload = resolve;
-        });
-        
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      } catch (e) {
+        reject(new Error('Failed to create PDF.js script element'));
+      }
+    });
+  };
+
+  // File upload handler with better validation
+  const handleFileUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Reset previous state
+    setError(null);
+    setExtractedData(null);
+    setRawExtractedText('');
+    setScanProgress(0);
+
+    // Validate file type
+    if (!supportedTypes[file.type]) {
+      setError(`Unsupported file type: ${file.type}. Supported types: ${Object.values(supportedTypes).join(', ')}`);
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size must be less than 10MB');
+      return;
+    }
+
+    // Check if file is corrupted or empty
+    if (file.size === 0) {
+      setError('File appears to be empty or corrupted');
+      return;
+    }
+
+    setUploadedFile(file);
+  }, []);
+
+  // FIXED: Better PDF text extraction with proper error handling
+  const extractTextFromPDF = async (file) => {
+    try {
+      const pdfjsLib = await loadPDFJS();
+      const arrayBuffer = await file.arrayBuffer();
+      
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('PDF file is empty or corrupted');
       }
 
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pdf = await pdfjsLib.getDocument({ 
+        data: arrayBuffer,
+        verbosity: 0 // Reduce console noise
+      }).promise;
       
       let fullText = '';
       const totalPages = pdf.numPages;
       
-      for (let i = 1; i <= totalPages; i++) {
-        setScanProgress((i / totalPages) * 30); // First 30% for extraction
-        
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => item.str).join(' ');
-        fullText += pageText + '\n\n';
+      if (totalPages === 0) {
+        throw new Error('PDF has no pages');
       }
       
-      return fullText;
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        try {
+          const page = await pdf.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .filter(item => item.str && item.str.trim())
+            .map(item => item.str)
+            .join(' ');
+          
+          if (pageText.trim()) {
+            fullText += pageText + '\n\n';
+          }
+          
+          // Update progress
+          setScanProgress(Math.round((pageNum / totalPages) * 40) + 10);
+        } catch (pageError) {
+          console.warn(`Error processing page ${pageNum}:`, pageError);
+          // Continue with other pages
+        }
+      }
+      
+      if (!fullText.trim()) {
+        throw new Error('No readable text found in PDF. The document may be scanned images or protected.');
+      }
+      
+      return fullText.trim();
     } catch (error) {
       console.error('PDF extraction error:', error);
-      throw new Error('Failed to extract text from PDF. Please ensure the PDF contains selectable text.');
+      throw new Error(`Failed to extract text from PDF: ${error.message}`);
     }
   };
 
-  // Extract text from DOCX files
-  const extractTextFromDOCX = async (file) => {
+  // FIXED: Better Word document extraction
+  const extractTextFromWord = async (file) => {
     try {
       const arrayBuffer = await file.arrayBuffer();
+      
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('Word document is empty or corrupted');
+      }
+
       const result = await mammoth.extractRawText({ arrayBuffer });
-      return result.value;
+      
+      if (!result.value || !result.value.trim()) {
+        throw new Error('No readable text found in Word document');
+      }
+
+      // Check for extraction warnings
+      if (result.messages && result.messages.length > 0) {
+        console.warn('Word extraction warnings:', result.messages);
+      }
+
+      return result.value.trim();
     } catch (error) {
-      console.error('DOCX extraction error:', error);
-      throw new Error('Failed to extract text from Word document.');
+      console.error('Word extraction error:', error);
+      throw new Error(`Failed to extract text from Word document: ${error.message}`);
     }
   };
 
-  // OCR simulation for images (in production, use real OCR service)
-  const performOCR = async (file) => {
-    // In a real implementation, you would use:
-    // - Google Vision API
-    // - AWS Textract
-    // - Azure Computer Vision
-    // - Tesseract.js for client-side OCR
-    
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        reject(new Error('OCR functionality requires integration with an OCR service. Please upload a text-based document instead.'));
-      }, 2000);
-    });
-  };
-
-  // Main text extraction function
+  // FIXED: Comprehensive text extraction with better error handling
   const extractTextFromFile = async (file) => {
-    const fileType = file.type;
-    
-    if (fileType === 'application/pdf') {
-      return await extractTextFromPDF(file);
-    } else if (fileType.includes('wordprocessingml') || fileType === 'application/msword') {
-      return await extractTextFromDOCX(file);
-    } else if (fileType === 'text/plain' || fileType === 'text/html') {
-      return await file.text();
-    } else if (fileType.startsWith('image/')) {
-      return await performOCR(file);
-    } else {
-      throw new Error(`Unsupported file type: ${fileType}`);
-    }
-  };
-
-  // OpenAI API call for intelligent data extraction
-  const extractDataWithOpenAI = async (text, userApiKey) => {
-
-    console.log(text)
-    const prompt = `
-You are an expert document parser. Extract structured data from the following document text and return it as a JSON object.
-
-The document appears to be a purchase order, invoice, or business document. Extract the following information:
-
-1. Order Information:
-   - poNumber (purchase order number)
-   - orderDate (in YYYY-MM-DD format)
-   - estimatedDelivery (in YYYY-MM-DD format)
-   - reference
-   - notes
-
-2. Customer Information:
-   - companyName
-   - contactPerson
-   - email
-   - phone
-   - abn (Australian Business Number if present)
-   - address (object with street, city, state, postcode, country)
-
-3. Vendor/Supplier Information:
-   - companyName
-   - contactPerson
-   - email
-   - phone
-   - abn
-   - address (object with street, city, state, postcode, country)
-
-4. Delivery Address:
-   - street
-   - city
-   - state
-   - postcode
-   - country
-
-5. Products Array (each product should have):
-   - itemCode
-   - productName
-   - description
-   - quantity (as number)
-   - unitPrice (as number)
-   - pricePerUnit (e.g., "each", "meter", "kg")
-   - currency (e.g., "AUD", "USD")
-   - category (try to determine from description)
-   - material (if mentioned)
-   - dimensions (object with length, width, height, diameter, thickness, unit)
-   - weight (if mentioned)
-
-6. Financial Information:
-   - subtotal (as number)
-   - gst (as number)
-   - total (as number)
-   - currency
-
-7. Terms:
-   - paymentTerms
-   - deliveryTerms
-   - documentation
-   - quantityTolerance
-
-Extract only the information that is clearly present in the document. Use null for missing values.
-For Australian addresses, common states are: VIC, NSW, QLD, SA, WA, TAS, NT, ACT.
-For dates, convert to YYYY-MM-DD format.
-For numbers, extract as actual numbers, not strings.
-
-Return only valid JSON without any additional text or explanation.
-
-Document text:
-${text}`;
-
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userApiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert document parser that extracts structured business data from documents. Always respond with valid JSON only.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 2000
-        })
-      });
+      setProcessingStep('Reading document...');
+      setScanProgress(10);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`OpenAI API error: ${errorData.error?.message || response.statusText}`);
+      let extractedText = '';
+
+      switch (file.type) {
+        case 'application/pdf':
+          extractedText = await extractTextFromPDF(file);
+          break;
+          
+        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+        case 'application/msword':
+          extractedText = await extractTextFromWord(file);
+          break;
+          
+        case 'text/plain':
+        case 'text/csv': {
+          const text = await file.text();
+          if (!text.trim()) {
+            throw new Error('Text file is empty');
+          }
+          extractedText = text;
+          break;
+        }
+        
+        default:
+          throw new Error(`Unsupported file type: ${file.type}`);
       }
 
-      const data = await response.json();
-      console.log('OpenAI API response:', data);
-      const extractedText = data.choices[0].message.content;
-      
-      // Parse the JSON response
-      try {
-        const parsedData = JSON.parse(extractedText);
-        return parsedData;
-      } catch (parseError) {
-        console.error('Failed to parse OpenAI response as JSON:', extractedText);
-        throw new Error('OpenAI returned invalid JSON. Please try again.');
+      if (!extractedText || extractedText.trim().length < 10) {
+        throw new Error('Document contains insufficient text content for analysis');
       }
-      
+
+      setScanProgress(50);
+      return extractedText;
     } catch (error) {
-      console.error('OpenAI API error:', error);
+      console.error('Text extraction error:', error);
       throw error;
     }
   };
 
-  // Handle file selection
-  const handleFileSelect = (event) => {
-    const selectedFile = event.target.files[0];
-    if (!selectedFile) return;
+  // FIXED: Better OpenAI API integration with error handling
+  const processWithOpenAI = async (extractedText) => {
+    setProcessingStep('Analyzing document with AI...');
+    setScanProgress(60);
 
-    // Check file type
-    if (!Object.keys(supportedTypes).includes(selectedFile.type)) {
-      setError(`Unsupported file type: ${selectedFile.type}`);
-      return;
+    const systemPrompt = `You are a document analysis assistant for a steel/metal trading company. Analyze the provided document text and extract relevant information for an order form.
+
+Return ONLY a valid JSON object with this structure (fill only fields you can confidently identify):
+
+{
+  "customerInfo": {
+    "companyName": "",
+    "contactPerson": "",
+    "email": "",
+    "phone": "",
+    "abn": "",
+    "address": {
+      "street": "",
+      "city": "",
+      "state": "",
+      "postcode": "",
+      "country": "Australia"
     }
-
-    // Check file size (max 50MB)
-    if (selectedFile.size > 50 * 1024 * 1024) {
-      setError('File size must be less than 50MB');
-      return;
+  },
+  "deliveryAddress": {
+    "street": "",
+    "city": "",
+    "state": "",
+    "postcode": "",
+    "country": "Australia"
+  },
+  "orderDetails": {
+    "poNumber": "",
+    "orderDate": "",
+    "estimatedDelivery": "",
+    "reference": "",
+    "notes": ""
+  },
+  "products": [
+    {
+      "itemCode": "",
+      "productName": "",
+      "description": "",
+      "category": "Steel Products",
+      "material": "AS/NZS 4671:2019",
+      "dimensions": {
+        "length": "",
+        "width": "",
+        "height": "",
+        "diameter": "",
+        "thickness": "",
+        "unit": "mm"
+      },
+      "weight": "",
+      "finish": "Raw/Mill Finish",
+      "quantity": 1,
+      "unitPrice": "",
+      "currency": "AUD",
+      "isACRSCertified": false
     }
+  ],
+  "terms": {
+    "paymentTerms": "",
+    "deliveryTerms": "",
+    "notes": ""
+  },
+  "confidence": {
+    "overall": 0.5,
+    "customerInfo": 0.5,
+    "products": 0.5,
+    "orderDetails": 0.5
+  }
+}
 
-    setFile(selectedFile);
-    setError(null);
-    setExtractedData(null);
-    setRawText('');
-    setScanProgress(0);
+Guidelines:
+- Return ONLY valid JSON, no markdown or additional text
+- Set confidence scores 0.0-1.0 based on information clarity
+- Leave fields empty ("") if uncertain
+- For Australian companies: look for ABN, state abbreviations (VIC/NSW/QLD)
+- Extract steel product details: grades, dimensions in mm, quantities
+- Parse dates to YYYY-MM-DD format`;
+
+    try {
+      // Limit text length to prevent API limits
+      const truncatedText = extractedText.length > 8000 
+        ? extractedText.substring(0, 8000) + '...[truncated]'
+        : extractedText;
+
+      const response = await fetch('/api/openai/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Analyze this document:\n\n${truncatedText}` }
+          ],
+          model: 'gpt-4o',
+          temperature: 0.1,
+          max_tokens: 4000
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`API Error ${response.status}: ${errorData.error || 'Unknown error'}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.choices || !result.choices[0] || !result.choices[0].message) {
+        throw new Error('Invalid response format from AI service');
+      }
+
+      const aiResponse = result.choices[0].message.content;
+      setScanProgress(90);
+      
+      // Parse JSON response with multiple fallback methods
+      let parsedData;
+      try {
+        // Try direct JSON parse
+        parsedData = JSON.parse(aiResponse);
+      } catch (parseError) {
+        try {
+          // Try extracting JSON from markdown code blocks
+          const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (jsonMatch) {
+            parsedData = JSON.parse(jsonMatch[1]);
+          } else {
+            // Try finding JSON object in text
+            const jsonStart = aiResponse.indexOf('{');
+            const jsonEnd = aiResponse.lastIndexOf('}');
+            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+              const jsonStr = aiResponse.substring(jsonStart, jsonEnd + 1);
+              parsedData = JSON.parse(jsonStr);
+            } else {
+              throw new Error('No valid JSON found in AI response');
+            }
+          }
+        } catch (secondParseError) {
+          console.error('AI Response:', aiResponse);
+          throw new Error('AI returned invalid JSON format. Please try again.');
+        }
+      }
+
+      // Validate the parsed data structure
+      if (!parsedData || typeof parsedData !== 'object') {
+        throw new Error('AI returned invalid data structure');
+      }
+
+      // Ensure required fields exist with defaults
+      const validatedData = {
+        customerInfo: parsedData.customerInfo || {},
+        deliveryAddress: parsedData.deliveryAddress || {},
+        orderDetails: parsedData.orderDetails || {},
+        products: Array.isArray(parsedData.products) ? parsedData.products : [],
+        terms: parsedData.terms || {},
+        confidence: parsedData.confidence || {
+          overall: 0.3,
+          customerInfo: 0.3,
+          products: 0.3,
+          orderDetails: 0.3
+        }
+      };
+
+      setScanProgress(100);
+      return validatedData;
+    } catch (error) {
+      console.error('OpenAI processing error:', error);
+      
+      // Provide more specific error messages
+      if (error.message.includes('API Error 401')) {
+        throw new Error('AI service authentication failed. Please check API configuration.');
+      } else if (error.message.includes('API Error 429')) {
+        throw new Error('AI service rate limit exceeded. Please try again in a moment.');
+      } else if (error.message.includes('API Error 500')) {
+        throw new Error('AI service is temporarily unavailable. Please try again.');
+      } else {
+        throw new Error(`AI analysis failed: ${error.message}`);
+      }
+    }
   };
 
-  // Scan document
+  // FIXED: Main scanning function with comprehensive error handling
   const scanDocument = async () => {
-    if (!file) return;
-
-    // Check if API key is provided
-    const currentApiKey = apiKey || localStorage.getItem('openai_api_key');
-    if (!currentApiKey) {
-      setShowApiKeyInput(true);
+    if (!uploadedFile) {
+      setError('No file selected');
       return;
     }
 
     setScanning(true);
     setError(null);
     setScanProgress(0);
+    setProcessingStep('Starting analysis...');
 
     try {
-      // Extract text from file
-      setScanProgress(10);
-      const text = await extractTextFromFile(file);
-      setRawText(text);
-      
-      // Process with OpenAI
-      setScanProgress(50);
-      const structuredData = await extractDataWithOpenAI(text, currentApiKey);
-      setExtractedData(structuredData);
-      
-      setScanProgress(100);
-      
-      // Save API key for future use (optional)
-      if (apiKey) {
-        localStorage.setItem('openai_api_key', apiKey);
+      // Step 1: Extract text from document
+      const extractedText = await extractTextFromFile(uploadedFile);
+      setRawExtractedText(extractedText);
+
+      if (!extractedText.trim()) {
+        throw new Error('No text could be extracted from the document');
       }
+
+      // Step 2: Process with OpenAI
+      const structuredData = await processWithOpenAI(extractedText);
       
-    } catch (err) {
-      setError(err.message);
-      console.error('Scanning error:', err);
+      setExtractedData(structuredData);
+      setProcessingStep('Analysis complete!');
+      
+    } catch (error) {
+      console.error('Scanning error:', error);
+      setError(error.message || 'An unexpected error occurred during document analysis');
     } finally {
       setScanning(false);
     }
@@ -324,596 +450,358 @@ ${text}`;
 
   // Apply extracted data to form
   const applyExtractedData = () => {
-    if (!extractedData) return;
-    
-    // Transform the OpenAI response to match the expected form structure
-    const transformedData = {
-      // Basic order info
-      poNumber: extractedData.poNumber || '',
-      orderDate: extractedData.orderDate || '',
-      estimatedDelivery: extractedData.estimatedDelivery || '',
-      reference: extractedData.reference || '',
-      notes: extractedData.notes || '',
-
-      // Customer information
-      customerInfo: {
-        companyName: extractedData.customerInfo?.companyName || extractedData.customer?.companyName || '',
-        contactPerson: extractedData.customerInfo?.contactPerson || extractedData.customer?.contactPerson || '',
-        email: extractedData.customerInfo?.email || extractedData.customer?.email || '',
-        phone: extractedData.customerInfo?.phone || extractedData.customer?.phone || '',
-        abn: extractedData.customerInfo?.abn || extractedData.customer?.abn || '',
-        address: extractedData.customerInfo?.address || extractedData.customer?.address || {
-          street: '',
-          city: '',
-          state: 'VIC',
-          postcode: '',
-          country: 'Australia'
-        }
-      },
-
-      // Delivery address
-      deliveryAddress: extractedData.deliveryAddress || extractedData.delivery?.address || {
-        street: '',
-        city: '',
-        state: 'VIC',
-        postcode: '',
-        country: 'Australia'
-      },
-
-      // Products
-      products: (extractedData.products || extractedData.items || []).map(product => ({
-        itemCode: product.itemCode || '',
-        productName: product.productName || product.name || '',
-        description: product.description || '',
-        quantity: product.quantity || 1,
-        unitPrice: product.unitPrice || product.price || '',
-        pricePerUnit: product.pricePerUnit || 'each',
-        currency: product.currency || 'AUD',
-        category: product.category || 'Steel Products',
-        material: product.material || 'AS/NZS 4671:2019',
-        dimensions: {
-          length: product.dimensions?.length || '',
-          width: product.dimensions?.width || '',
-          height: product.dimensions?.height || '',
-          diameter: product.dimensions?.diameter || '',
-          thickness: product.dimensions?.thickness || '',
-          unit: product.dimensions?.unit || 'mm'
-        },
-        weight: product.weight || '',
-        finish: 'Raw/Mill Finish',
-        specifications: [],
-        tags: [],
-        isACRSCertified: false
-      })),
-
-      // Terms
-      paymentTerms: extractedData.terms?.paymentTerms || extractedData.paymentTerms || '30 Days from delivery to yard',
-      deliveryTerms: extractedData.terms?.deliveryTerms || extractedData.deliveryTerms || 'Delivery Duty paid - unloading by purchaser',
-      documentation: extractedData.terms?.documentation || 'Commercial Invoice Certificate of Origin Mill Test Certificates ACRS Certification',
-      quantityTolerance: extractedData.terms?.quantityTolerance || '+/- 10%',
-
-      // Financial data
-      financials: {
-        subtotal: extractedData.subtotal || extractedData.financials?.subtotal || 0,
-        gst: extractedData.gst || extractedData.financials?.gst || 0,
-        total: extractedData.total || extractedData.financials?.total || 0
-      }
-    };
-    
-    onDataExtracted(transformedData);
-    onClose();
+    if (extractedData && onDataExtracted) {
+      onDataExtracted(extractedData);
+    }
   };
 
-  // Copy to clipboard
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-  };
-
-  // Save API key
-  const saveApiKey = () => {
-    if (apiKey.trim()) {
-      localStorage.setItem('openai_api_key', apiKey.trim());
-      setShowApiKeyInput(false);
-      scanDocument();
+  // Reset scanner
+  const resetScanner = () => {
+    setUploadedFile(null);
+    setScanning(false);
+    setScanProgress(0);
+    setExtractedData(null);
+    setError(null);
+    setProcessingStep('');
+    setRawExtractedText('');
+    setShowRawText(false);
+    
+    // Reset file input
+    const fileInput = document.getElementById('document-upload');
+    if (fileInput) {
+      fileInput.value = '';
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-6xl w-full max-h-[95vh] overflow-hidden flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                <Brain className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">AI Document Scanner</h2>
-                <p className="text-sm text-gray-600">Extract data from PDFs, Word docs using OpenAI</p>
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1">
-          {showApiKeyInput ? (
-            // API Key Input
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Zap className="w-8 h-8 text-yellow-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">OpenAI API Key Required</h3>
-              <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                To use AI-powered document parsing, please provide your OpenAI API key. 
-                Your key will be stored locally and used only for document processing.
-              </p>
-              
-              <div className="max-w-md mx-auto space-y-4">
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowApiKeyInput(false)}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveApiKey}
-                    disabled={!apiKey.trim()}
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
-                  >
-                    Save & Scan
-                  </button>
-                </div>
-              </div>
-              
-              <div className="mt-6 p-4 bg-blue-50 rounded-lg max-w-md mx-auto">
-                <p className="text-xs text-blue-800">
-                  Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">OpenAI Platform</a>. 
-                  Your key is stored locally and never shared.
-                </p>
-              </div>
-            </div>
-          ) : !file ? (
-            // File Upload
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Upload className="w-8 h-8 text-blue-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Upload Document</h3>
-              <p className="text-gray-600 mb-6">
-                Select a purchase order, invoice, or contract to extract data automatically with AI
-              </p>
-              
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bot className="w-6 h-6 text-purple-600" />
+            AI Document Scanner
+          </CardTitle>
+          <CardDescription>
+            Upload a purchase order, quote, or invoice to automatically extract and fill order information
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          
+          {/* File Upload Area */}
+          {!uploadedFile && (
+            <div className="relative">
               <input
                 type="file"
-                accept=".pdf,.docx,.doc,.txt,.html,.jpg,.jpeg,.png,.webp"
-                onChange={handleFileSelect}
+                accept=".pdf,.docx,.doc,.txt,.csv,.xls,.xlsx"
+                onChange={handleFileUpload}
                 className="hidden"
                 id="document-upload"
               />
-              <label
+              <Label
                 htmlFor="document-upload"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
+                className="flex flex-col items-center gap-4 px-6 py-12 border-2 border-dashed border-muted-foreground/25 rounded-lg cursor-pointer hover:border-purple-500/50 transition-colors bg-gradient-to-br from-purple-50 to-blue-50"
               >
-                <Upload className="w-5 h-5" />
-                Choose Document
-              </label>
-              
-              <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl mx-auto">
-                {Object.entries(supportedTypes).map(([type, name]) => (
-                  <div key={type} className="p-3 border border-gray-200 rounded-lg text-center">
-                    <FileText className="w-6 h-6 text-gray-400 mx-auto mb-2" />
-                    <span className="text-xs text-gray-600">{name}</span>
-                  </div>
-                ))}
-              </div>
+                <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center">
+                  <Upload className="w-8 h-8 text-purple-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-medium text-gray-700 mb-1">Upload Document</p>
+                  <p className="text-sm text-muted-foreground">
+                    Drag & drop or click to select files
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Supported: PDF, Word, Text, CSV, Excel (Max 10MB)
+                  </p>
+                </div>
+              </Label>
             </div>
-          ) : (
-            <div className="space-y-6">
-              {/* File Info */}
-              <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-lg">
-                <File className="w-8 h-8 text-blue-600" />
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-800">{file.name}</h3>
-                  <p className="text-sm text-gray-600">
-                    {supportedTypes[file.type]} • {(file.size / 1024).toFixed(1)} KB
-                  </p>
-                </div>
-                {!scanning && !extractedData && (
-                  <button
-                    onClick={scanDocument}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    Scan with AI
-                  </button>
-                )}
-              </div>
+          )}
 
-              {/* Scanning Progress */}
-              {scanning && (
-                <div className="text-center py-8">
-                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing with AI...</h3>
-                  <p className="text-gray-600 mb-4">
-                    {scanProgress < 30 ? 'Extracting text from document...' :
-                     scanProgress < 50 ? 'Text extracted, sending to OpenAI...' :
-                     'AI is analyzing and structuring the data...'}
-                  </p>
-                  <div className="w-full max-w-md mx-auto bg-gray-200 rounded-full h-2">
-                    <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${scanProgress}%` }}
-                    ></div>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-2">{scanProgress}% complete</p>
-                </div>
-              )}
-
-              {/* Error Display */}
-              {error && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+          {/* Uploaded File Info */}
+          {uploadedFile && !scanning && !extractedData && (
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-8 h-8 text-blue-600" />
                     <div>
-                      <h4 className="font-medium text-red-800">Scanning Error</h4>
-                      <p className="text-red-700 text-sm">{error}</p>
-                      {error.includes('API') && (
-                        <button
-                          onClick={() => setShowApiKeyInput(true)}
-                          className="mt-2 text-sm text-red-600 underline hover:text-red-800"
-                        >
-                          Update API Key
-                        </button>
-                      )}
+                      <h4 className="font-medium text-blue-900">{uploadedFile.name}</h4>
+                      <p className="text-sm text-blue-700">
+                        {supportedTypes[uploadedFile.type]} • {(uploadedFile.size / 1024).toFixed(1)} KB
+                      </p>
                     </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={scanDocument}
+                      className="bg-purple-600 hover:bg-purple-700"
+                    >
+                      <Scan className="w-4 h-4 mr-2" />
+                      Scan Document
+                    </Button>
+                    <Button
+                      onClick={resetScanner}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
                   </div>
                 </div>
-              )}
+              </CardContent>
+            </Card>
+          )}
 
-              {/* Results */}
-              {extractedData && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                      Data Extracted Successfully
-                    </h3>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setPreviewMode(previewMode === 'structured' ? 'raw' : 'structured')}
-                        className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
-                      >
-                        {previewMode === 'structured' ? 'Show Raw Text' : 'Show Structured'}
-                      </button>
-                    </div>
+          {/* Scanning Progress */}
+          {scanning && (
+            <Card>
+              <CardContent className="py-8">
+                <div className="text-center space-y-4">
+                  <div className="relative">
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                      className="w-12 h-12 mx-auto"
+                    >
+                      <Zap className="w-12 h-12 text-purple-600" />
+                    </motion.div>
                   </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-2">
+                      {processingStep}
+                    </h3>
+                    <Progress value={scanProgress} className="h-3 mb-2" />
+                    <p className="text-sm text-gray-600">{scanProgress}% complete</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-                  {previewMode === 'structured' ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Order Info */}
-                      {(extractedData.poNumber || extractedData.orderDate) && (
-                        <div className="p-4 border border-gray-200 rounded-lg">
-                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-blue-600" />
-                            Order Information
-                          </h4>
-                          <div className="space-y-2 text-sm">
-                            {extractedData.poNumber && (
-                              <div><span className="font-medium">PO Number:</span> {extractedData.poNumber}</div>
-                            )}
-                            {extractedData.orderDate && (
-                              <div><span className="font-medium">Order Date:</span> {extractedData.orderDate}</div>
-                            )}
-                            {extractedData.estimatedDelivery && (
-                              <div><span className="font-medium">Delivery Date:</span> {extractedData.estimatedDelivery}</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
+          {/* Error Display */}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                <p className="font-medium mb-1">Document Analysis Error</p>
+                <p className="mb-3">{error}</p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={resetScanner}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Try Again
+                  </Button>
+                  {onSkip && (
+                    <Button
+                      onClick={onSkip}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Skip & Fill Manually
+                    </Button>
+                  )}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
-                      {/* Customer Info */}
-                      {extractedData.customerInfo && (
-                        <div className="p-4 border border-gray-200 rounded-lg">
-                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                            <Building className="w-4 h-4 text-green-600" />
-                            Customer Information
-                          </h4>
-                          <div className="space-y-2 text-sm">
-                            {extractedData.customerInfo.companyName && (
-                              <div><span className="font-medium">Company:</span> {extractedData.customerInfo.companyName}</div>
-                            )}
-                            {extractedData.customerInfo.contactPerson && (
-                              <div><span className="font-medium">Contact:</span> {extractedData.customerInfo.contactPerson}</div>
-                            )}
-                            {extractedData.customerInfo.email && (
-                              <div><span className="font-medium">Email:</span> {extractedData.customerInfo.email}</div>
-                            )}
-                          </div>
+          {/* Extracted Data Results */}
+          {extractedData && (
+            <div className="space-y-4">
+              <Card className="bg-green-50 border-green-200">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-green-800">
+                    <CheckCircle className="w-5 h-5" />
+                    Document Analysis Complete
+                  </CardTitle>
+                  <CardDescription className="text-green-700">
+                    Successfully extracted information from {uploadedFile.name}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  
+                  {/* Confidence Scores */}
+                  {extractedData.confidence && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-green-600">
+                          {Math.round((extractedData.confidence.overall || 0) * 100)}%
                         </div>
-                      )}
-
-                      {/* Products */}
-                      {extractedData.products && extractedData.products.length > 0 && (
-                        <div className="md:col-span-2 p-4 border border-gray-200 rounded-lg">
-                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                            <Package className="w-4 h-4 text-purple-600" />
-                            Products ({extractedData.products.length})
-                          </h4>
-                          <div className="space-y-3">
-                            {extractedData.products.map((product, index) => (
-                              <div key={index} className="p-3 bg-gray-50 rounded border">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                                  <div>
-                                    <span className="font-medium">Item:</span> {product.itemCode || 'N/A'}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Product:</span> {product.productName || 'N/A'}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Qty:</span> {product.quantity} × ${product.unitPrice}
-                                  </div>
-                                </div>
-                                {product.description && (
-                                  <p className="text-xs text-gray-600 mt-1">{product.description}</p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Financial Info */}
-                      {(extractedData.subtotal || extractedData.total) && (
-                        <div className="p-4 border border-gray-200 rounded-lg">
-                          <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                            <DollarSign className="w-4 h-4 text-yellow-600" />
-                            Financial Summary
-                          </h4>
-                          <div className="space-y-2 text-sm">
-                            {extractedData.subtotal && (
-                              <div><span className="font-medium">Subtotal:</span> ${extractedData.subtotal}</div>
-                            )}
-                            {extractedData.gst && (
-                              <div><span className="font-medium">GST:</span> ${extractedData.gst}</div>
-                            )}
-                            {extractedData.total && (
-                              <div><span className="font-medium">Total:</span> ${extractedData.total}</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="p-4 border border-gray-200 rounded-lg">
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="font-medium text-gray-800">Raw Extracted Text</h4>
-                        <button
-                          onClick={() => copyToClipboard(rawText)}
-                          className="flex items-center gap-1 px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
-                        >
-                          <Copy className="w-3 h-3" />
-                          Copy
-                        </button>
+                        <div className="text-xs text-gray-600">Overall</div>
                       </div>
-                      <pre className="text-xs text-gray-600 bg-gray-50 p-3 rounded max-h-96 overflow-y-auto whitespace-pre-wrap">
-                        {rawText}
-                      </pre>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-blue-600">
+                          {Math.round((extractedData.confidence.customerInfo || 0) * 100)}%
+                        </div>
+                        <div className="text-xs text-gray-600">Customer</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-purple-600">
+                          {Math.round((extractedData.confidence.products || 0) * 100)}%
+                        </div>
+                        <div className="text-xs text-gray-600">Products</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-orange-600">
+                          {Math.round((extractedData.confidence.orderDetails || 0) * 100)}%
+                        </div>
+                        <div className="text-xs text-gray-600">Order Details</div>
+                      </div>
                     </div>
                   )}
 
-                  {/* Apply Button */}
-                  <div className="flex justify-center pt-4">
-                    <button
-                      onClick={applyExtractedData}
-                      className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                    >
-                      <CheckCircle className="w-5 h-5" />
-                      Apply to Order Form
-                    </button>
+                  <Separator />
+
+                  {/* Extracted Information Summary */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* Customer Information */}
+                    {extractedData.customerInfo && Object.values(extractedData.customerInfo).some(v => v && v !== '') && (
+                      <div>
+                        <h4 className="font-medium mb-3 flex items-center gap-2">
+                          <Badge variant="secondary">Customer Info</Badge>
+                        </h4>
+                        <div className="space-y-2 text-sm">
+                          {extractedData.customerInfo.companyName && (
+                            <p><strong>Company:</strong> {extractedData.customerInfo.companyName}</p>
+                          )}
+                          {extractedData.customerInfo.contactPerson && (
+                            <p><strong>Contact:</strong> {extractedData.customerInfo.contactPerson}</p>
+                          )}
+                          {extractedData.customerInfo.email && (
+                            <p><strong>Email:</strong> {extractedData.customerInfo.email}</p>
+                          )}
+                          {extractedData.customerInfo.phone && (
+                            <p><strong>Phone:</strong> {extractedData.customerInfo.phone}</p>
+                          )}
+                          {extractedData.customerInfo.abn && (
+                            <p><strong>ABN:</strong> {extractedData.customerInfo.abn}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Order Details */}
+                    {extractedData.orderDetails && Object.values(extractedData.orderDetails).some(v => v && v !== '') && (
+                      <div>
+                        <h4 className="font-medium mb-3 flex items-center gap-2">
+                          <Badge variant="secondary">Order Details</Badge>
+                        </h4>
+                        <div className="space-y-2 text-sm">
+                          {extractedData.orderDetails.poNumber && (
+                            <p><strong>PO Number:</strong> {extractedData.orderDetails.poNumber}</p>
+                          )}
+                          {extractedData.orderDetails.orderDate && (
+                            <p><strong>Order Date:</strong> {extractedData.orderDetails.orderDate}</p>
+                          )}
+                          {extractedData.orderDetails.estimatedDelivery && (
+                            <p><strong>Delivery:</strong> {extractedData.orderDetails.estimatedDelivery}</p>
+                          )}
+                          {extractedData.orderDetails.reference && (
+                            <p><strong>Reference:</strong> {extractedData.orderDetails.reference}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Products */}
+                    {extractedData.products && extractedData.products.length > 0 && (
+                      <div className="md:col-span-2">
+                        <h4 className="font-medium mb-3 flex items-center gap-2">
+                          <Badge variant="secondary">Products ({extractedData.products.length})</Badge>
+                        </h4>
+                        <div className="space-y-3">
+                          {extractedData.products.slice(0, 3).map((product, index) => (
+                            <div key={index} className="p-3 bg-white rounded border text-sm">
+                              <div className="flex items-center gap-2 mb-2">
+                                {product.itemCode && <Badge variant="outline">{product.itemCode}</Badge>}
+                                {product.productName && <span className="font-medium">{product.productName}</span>}
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600">
+                                {product.quantity && <span>Qty: {product.quantity}</span>}
+                                {product.unitPrice && <span>Price: ${product.unitPrice}</span>}
+                                {product.material && <span>Material: {product.material}</span>}
+                                {product.category && <span>Category: {product.category}</span>}
+                              </div>
+                            </div>
+                          ))}
+                          {extractedData.products.length > 3 && (
+                            <p className="text-sm text-gray-600">
+                              ... and {extractedData.products.length - 3} more products
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-between pt-4">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => setShowRawText(!showRawText)}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        {showRawText ? 'Hide' : 'View'} Raw Text
+                      </Button>
+                      <Button
+                        onClick={resetScanner}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Scan Another
+                      </Button>
+                    </div>
+                    <Button
+                      onClick={applyExtractedData}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Apply to Form
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Raw Extracted Text */}
+              {showRawText && rawExtractedText && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Raw Extracted Text</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Textarea
+                      value={rawExtractedText}
+                      readOnly
+                      rows={10}
+                      className="text-xs font-mono"
+                    />
+                  </CardContent>
+                </Card>
               )}
             </div>
           )}
-        </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t border-gray-200">
-          <div className="flex justify-between items-center">
-            <div className="text-sm text-gray-500">
-              {file ? `Selected: ${file.name}` : 'No file selected'}
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              {file && !extractedData && !scanning && (
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setError(null);
-                    setRawText('');
-                    setScanProgress(0);
-                  }}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Choose Different File
-                </button>
-              )}
-              {extractedData && (
-                <button
-                  onClick={applyExtractedData}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Apply Data
-                </button>
-              )}
-            </div>
+          {/* Skip Option */}
+          <div className="text-center pt-4">
+            <Button
+              onClick={onSkip}
+              variant="ghost"
+              className="text-gray-600 hover:text-gray-800"
+            >
+              Skip document scanning and fill manually
+            </Button>
           </div>
-        </div>
-      </div>
+
+        </CardContent>
+      </Card>
     </div>
-  );
-};
-
-// Enhanced AddOrderComponent with Document Scanner Integration
-const AddOrderComponentWithScanner = () => {
-  const [showDocumentScanner, setShowDocumentScanner] = useState(false);
-  const [orderForm, setOrderForm] = useState({
-    // ... (keep existing orderForm state)
-  });
-  const [products, setProducts] = useState([{
-    // ... (keep existing products state)
-  }]);
-
-  // Handle data extracted from document scanner
-  const handleDocumentDataExtracted = (extractedData) => {
-    console.log('Extracted data:', extractedData);
-    
-    // Update order form with extracted data
-    if (extractedData.poNumber) {
-      setOrderForm(prev => ({ ...prev, poNumber: extractedData.poNumber }));
-    }
-    
-    if (extractedData.orderDate) {
-      setOrderForm(prev => ({ ...prev, orderDate: extractedData.orderDate }));
-    }
-    
-    if (extractedData.estimatedDelivery) {
-      setOrderForm(prev => ({ ...prev, estimatedDelivery: extractedData.estimatedDelivery }));
-    }
-    
-    if (extractedData.reference) {
-      setOrderForm(prev => ({ ...prev, reference: extractedData.reference }));
-    }
-    
-    if (extractedData.notes) {
-      setOrderForm(prev => ({ ...prev, notes: extractedData.notes }));
-    }
-
-    // Update customer info
-    if (extractedData.customerInfo) {
-      setOrderForm(prev => ({
-        ...prev,
-        customerInfo: {
-          ...prev.customerInfo,
-          ...extractedData.customerInfo
-        }
-      }));
-    }
-
-    // Update delivery address
-    if (extractedData.deliveryAddress) {
-      setOrderForm(prev => ({
-        ...prev,
-        deliveryAddress: {
-          ...prev.deliveryAddress,
-          ...extractedData.deliveryAddress
-        }
-      }));
-    }
-
-    // Update terms
-    if (extractedData.paymentTerms) {
-      setOrderForm(prev => ({ ...prev, paymentTerms: extractedData.paymentTerms }));
-    }
-    
-    if (extractedData.deliveryTerms) {
-      setOrderForm(prev => ({ ...prev, deliveryTerms: extractedData.deliveryTerms }));
-    }
-    
-    if (extractedData.documentation) {
-      setOrderForm(prev => ({ ...prev, documentation: extractedData.documentation }));
-    }
-    
-    if (extractedData.quantityTolerance) {
-      setOrderForm(prev => ({ ...prev, quantityTolerance: extractedData.quantityTolerance }));
-    }
-
-    // Update products
-    if (extractedData.products && extractedData.products.length > 0) {
-      const newProducts = extractedData.products.map((product, index) => ({
-        id: Date.now() + index,
-        itemCode: product.itemCode || '',
-        productName: product.productName || '',
-        description: product.description || '',
-        category: product.category || 'Steel Products',
-        material: product.material || 'AS/NZS 4671:2019',
-        dimensions: {
-          length: product.dimensions?.length || '',
-          width: product.dimensions?.width || '',
-          height: product.dimensions?.height || '',
-          diameter: product.dimensions?.diameter || '',
-          thickness: product.dimensions?.thickness || '',
-          unit: product.dimensions?.unit || 'mm'
-        },
-        weight: product.weight || '',
-        finish: product.finish || 'Raw/Mill Finish',
-        specifications: product.specifications || [],
-        tags: product.tags || [],
-        isACRSCertified: product.isACRSCertified || false,
-        unitPrice: product.unitPrice || '',
-        pricePerUnit: product.pricePerUnit || 'each',
-        currency: product.currency || 'AUD',
-        quantity: product.quantity || 1
-      }));
-      
-      setProducts(newProducts);
-    }
-
-    // Show success message
-    alert(`Document scanned successfully! Extracted ${extractedData.products?.length || 0} products and populated order form.`);
-  };
-
-  return (
-    <>
-      {/* Document Scanner Modal */}
-      {showDocumentScanner && (
-        <DocumentScanner
-          onDataExtracted={handleDocumentDataExtracted}
-          onClose={() => setShowDocumentScanner(false)}
-        />
-      )}
-
-      {/* Your existing AddOrderComponent JSX here */}
-      {/* Add the document scanner button in the header or appropriate location */}
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={() => setShowDocumentScanner(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-lg"
-        >
-          <Brain className="w-5 h-5" />
-          Scan Document with AI
-        </button>
-        
-        <div className="text-sm text-gray-500">
-          Upload PDF, Word, or image files to auto-fill order details
-        </div>
-      </div>
-      
-      {/* Rest of your existing component */}
-    </>
   );
 };
 

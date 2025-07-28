@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { collection, addDoc, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import DocumentScanner from '@/app/(components)/DocumentScanner';
 
 import { db, storage } from '@/firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -319,13 +320,110 @@ const AddOrderForm = () => {
 
   // Check email and proceed to next step
   const handleEmailCheck = () => {
-    if (!userEmail || !userEmail.includes('@')) {
-      alert('Please enter a valid email address');
-      return;
-    }
-    setEmailChecked(true);
-    setStep(2);
-  };
+  if (!userEmail || !userEmail.includes('@')) {
+    alert('Please enter a valid email address');
+    return;
+  }
+  setEmailChecked(true);
+  setStep(1.5); // Go to document scanning step instead of directly to order details
+};
+  const handleDataExtracted = (extractedData) => {
+  console.log('=== APPLYING EXTRACTED DATA ===');
+  console.log('Extracted data:', extractedData);
+  
+  // Apply customer information
+  if (extractedData.customerInfo) {
+    setOrderForm(prev => ({
+      ...prev,
+      customerInfo: {
+        ...prev.customerInfo,
+        companyName: extractedData.customerInfo.companyName || prev.customerInfo.companyName,
+        contactPerson: extractedData.customerInfo.contactPerson || prev.customerInfo.contactPerson,
+        email: extractedData.customerInfo.email || prev.customerInfo.email,
+        phone: extractedData.customerInfo.phone || prev.customerInfo.phone,
+        abn: extractedData.customerInfo.abn || prev.customerInfo.abn,
+        address: {
+          street: extractedData.customerInfo.address?.street || prev.customerInfo.address.street,
+          city: extractedData.customerInfo.address?.city || prev.customerInfo.address.city,
+          state: extractedData.customerInfo.address?.state || prev.customerInfo.address.state,
+          postcode: extractedData.customerInfo.address?.postcode || prev.customerInfo.address.postcode,
+          country: extractedData.customerInfo.address?.country || prev.customerInfo.address.country
+        }
+      }
+    }));
+  }
+
+  // Apply order details
+  if (extractedData.orderDetails) {
+    setOrderForm(prev => ({
+      ...prev,
+      poNumber: extractedData.orderDetails.poNumber || prev.poNumber,
+      orderDate: extractedData.orderDetails.orderDate || prev.orderDate,
+      estimatedDelivery: extractedData.orderDetails.estimatedDelivery || prev.estimatedDelivery,
+      reference: extractedData.orderDetails.reference || prev.reference,
+      notes: extractedData.orderDetails.notes || prev.notes
+    }));
+  }
+
+  // Apply delivery address if provided
+  if (extractedData.deliveryAddress && Object.values(extractedData.deliveryAddress).some(v => v)) {
+    setOrderForm(prev => ({
+      ...prev,
+      deliveryAddress: {
+        street: extractedData.deliveryAddress.street || prev.deliveryAddress.street,
+        city: extractedData.deliveryAddress.city || prev.deliveryAddress.city,
+        state: extractedData.deliveryAddress.state || prev.deliveryAddress.state,
+        postcode: extractedData.deliveryAddress.postcode || prev.deliveryAddress.postcode,
+        country: extractedData.deliveryAddress.country || prev.deliveryAddress.country
+      },
+      sameAsCustomer: false // Set to false if delivery address is different
+    }));
+  }
+
+  // Apply products
+  if (extractedData.products && extractedData.products.length > 0) {
+    const newProducts = extractedData.products.map((product, index) => ({
+      id: Date.now() + index,
+      itemCode: product.itemCode || '',
+      productName: product.productName || '',
+      description: product.description || '',
+      category: product.category || 'Steel Products',
+      material: product.material || 'AS/NZS 4671:2019',
+      dimensions: {
+        length: product.dimensions?.length || '',
+        width: product.dimensions?.width || '',
+        height: product.dimensions?.height || '',
+        diameter: product.dimensions?.diameter || '',
+        thickness: product.dimensions?.thickness || '',
+        unit: product.dimensions?.unit || 'mm'
+      },
+      weight: product.weight || '',
+      finish: product.finish || 'Raw/Mill Finish',
+      specifications: [],
+      tags: [],
+      isACRSCertified: product.isACRSCertified || false,
+      unitPrice: product.unitPrice || '',
+      pricePerUnit: 'each',
+      currency: product.currency || 'AUD',
+      quantity: product.quantity || 1
+    }));
+    
+    setProducts(newProducts);
+    setCurrentProductIndex(0);
+  }
+
+  // Apply terms if provided
+  if (extractedData.terms) {
+    setOrderForm(prev => ({
+      ...prev,
+      paymentTerms: extractedData.terms.paymentTerms || prev.paymentTerms,
+      deliveryTerms: extractedData.terms.deliveryTerms || prev.deliveryTerms
+    }));
+  }
+
+  // Move to order details step
+  setStep(2);
+};
 
   // Add new product
   const addNewProduct = () => {
@@ -1035,47 +1133,19 @@ const AddOrderForm = () => {
              <div>
                <CardTitle className="text-2xl">Create New Order</CardTitle>
                <CardDescription>
-                 {step === 1 ? 'Verify your email and company details' : 
-                  step === 2 ? 'Enter order and product information' : 
-                  step === 3 ? 'Upload documents' : 
-                  step === 4 ? 'Processing and product check' : 
-                  'Order completed'}
-               </CardDescription>
+  {step === 1 ? 'Verify your email and company details' : 
+   step === 1.5 ? 'Scan documents to auto-fill order information' :
+   step === 2 ? 'Enter order and product information' : 
+   step === 3 ? 'Upload documents' : 
+   step === 4 ? 'Processing and product check' : 
+   'Order completed'}
+</CardDescription>
              </div>
            </div>
            
            {/* Progress indicator */}
-           <div className="mt-6 flex items-center gap-2">
-             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-               step >= 1 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-             }`}>
-               1
-             </div>
-             <div className={`h-1 w-16 ${step >= 2 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
-             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-               step >= 2 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-             }`}>
-               2
-             </div>
-             <div className={`h-1 w-16 ${step >= 3 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
-             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-               step >= 3 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-             }`}>
-               3
-             </div>
-             <div className={`h-1 w-16 ${step >= 4 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
-             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-               step >= 4 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-             }`}>
-               4
-             </div>
-             <div className={`h-1 w-16 ${step >= 5 ? 'bg-teal-600' : 'bg-gray-200'}`}></div>
-             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-               step >= 5 ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-600'
-             }`}>
-               5
-             </div>
-           </div>
+           {/* Step 1.5: Document Scanning */}
+
          </CardHeader>
        </Card>
 
@@ -1158,6 +1228,14 @@ const AddOrderForm = () => {
            </CardContent>
          </Card>
        )}
+       {/* Step 1.5: Document Scanning */}
+{step === 1.5 && emailChecked && (
+  <DocumentScanner
+    onDataExtracted={handleDataExtracted}
+    onSkip={() => setStep(2)}
+    companyData={companyData}
+  />
+)}
 
        {/* Step 2: Order Details */}
        {step === 2 && emailChecked && (
