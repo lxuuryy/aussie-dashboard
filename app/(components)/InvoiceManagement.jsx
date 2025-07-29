@@ -652,7 +652,7 @@ const getCustomerAddress = (customerInfo) => {
                       <TableHead>Customer</TableHead>
                       <TableHead>Product</TableHead>
                       <TableHead>Amount</TableHead>
-                      <TableHead>Order Status</TableHead>
+                      
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -691,18 +691,22 @@ const getCustomerAddress = (customerInfo) => {
                           </TableCell>
 
                           <TableCell>
-                            <div>
-                              <div className="font-medium text-gray-900">
-                                {invoice.items?.[0]?.productName} 
-                              </div>
-                              <div className="text-sm text-gray-600">
-                                {invoice.items?.[0]?.totalWeight || invoice.items?.[0]?.quantity}t @ {formatCurrency(invoice.items?.[0]?.pricePerTonne || 0)}/t
-                              </div>
-                              <div className="text-sm text-gray-500">
-                                {invoice.salesContract}
-                              </div>
-                            </div>
-                          </TableCell>
+  <div>
+    {invoice.items && invoice.items.length > 0 ? (
+      <>
+        {invoice.items.map((item, index) => (
+          <div key={index} className="font-medium text-gray-900 text-sm mb-1">
+            {item.productName}
+          </div>
+        ))}
+        
+      </>
+    ) : (
+      <div className="text-sm text-gray-500">No product data</div>
+    )}
+  </div>
+</TableCell>
+
 
                           <TableCell>
                             <div className="font-bold text-gray-900">
@@ -713,14 +717,7 @@ const getCustomerAddress = (customerInfo) => {
                             </div>
                           </TableCell>
 
-                          <TableCell>
-                            {invoice.orderStatus && (
-                              <Badge variant="secondary" className="capitalize">
-                                {invoice.orderStatus}
-                              </Badge>
-                            )}
-                          </TableCell>
-
+                          
                           <TableCell>
                             <div className="flex items-center gap-2 flex-wrap">
                               {invoice.pdfUrl ? (
@@ -878,9 +875,7 @@ const getCustomerAddress = (customerInfo) => {
                              <div>Type: {invoice.items?.[0]?.barType} × {invoice.items?.[0]?.length}m</div>
                              <div>Weight: {invoice.items?.[0]?.totalWeight || invoice.items?.[0]?.quantity}t</div>
                              <div>Price: {formatCurrency(invoice.items?.[0]?.pricePerTonne || 0)}/t</div>
-                             {invoice.salesContract && (
-                               <div>Contract: {invoice.salesContract}</div>
-                             )}
+                            
                            </div>
                          </div>
 
@@ -908,6 +903,16 @@ const getCustomerAddress = (customerInfo) => {
                         <div>
                           <h4 className="text-sm font-medium text-gray-900 mb-2">Actions</h4>
                           <div className="flex flex-wrap gap-2">
+
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => router.push(`/edit-order-details/${invoice.poNumber}`)}
+                                title="Edit Order Details"
+                              >
+                                <Edit className="w-4 h-4 mr-2" />
+                                Edit Order
+                              </Button>
                             {invoice.pdfUrl ? (
                               <Button
                                 variant="outline"
@@ -976,6 +981,7 @@ const getCustomerAddress = (customerInfo) => {
                               Track Order
                             </Button>
                             
+
                             {invoice.contractUrl && (
                               <Button
                                 variant="outline"
