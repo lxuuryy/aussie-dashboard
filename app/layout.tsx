@@ -21,7 +21,8 @@ import {
   Truck,
   Plus,
   Menu,
-  X
+  X,
+  Ship
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Script from "next/script";
@@ -156,6 +157,13 @@ export default function RootLayout({
                   </NavigationMenu>
 
                   <Button variant="ghost" size="sm" asChild>
+                    <Link href="/manage-shipping" className="flex items-center gap-2">
+                      <Ship className="w-4 h-4" />
+                      Manage Shipping
+                    </Link>
+                  </Button>
+
+                  <Button variant="ghost" size="sm" asChild>
                     <Link href="/register-company" className="flex items-center gap-2">
                       <Building2 className="w-4 h-4" />
                       Company Settings
@@ -222,6 +230,21 @@ export default function RootLayout({
                     <div>
                       <div className="text-lg font-semibold text-gray-900">Home</div>
                       <div className="text-sm text-gray-500">Go to dashboard</div>
+                    </div>
+                  </Link>
+
+                  {/* Manage Shipping Link */}
+                  <Link
+                    href="/manage-shipping"
+                    className="flex items-center gap-4 p-4 rounded-lg hover:bg-gray-50 transition-colors"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <div className="flex items-center justify-center w-12 h-12 bg-cyan-100 rounded-lg">
+                      <Ship className="w-6 h-6 text-cyan-600" />
+                    </div>
+                    <div>
+                      <div className="text-lg font-semibold text-gray-900">Manage Shipping</div>
+                      <div className="text-sm text-gray-500">Track and manage shipments</div>
                     </div>
                   </Link>
 

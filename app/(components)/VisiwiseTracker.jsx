@@ -2,12 +2,9 @@
 
 import { useState, useEffect } from 'react';
 
-// API URLs and Keys
+// API URLs and Keys - REMOVED SEAROUTES AND OPENAI KEYS
 const API_URL = '/api/visiwise';
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ;
-
-// Embedded API Keys
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GOOGLE_MAPS_API_KEY = 'AIzaSyCtrM0nEB2OOEEfQ7sFG8AURtV3KeyPrRM';
 
 const CompleteVisiwiseTracker = () => {
   const [trackingData, setTrackingData] = useState({
@@ -35,43 +32,34 @@ const CompleteVisiwiseTracker = () => {
   // Load Google Maps API
   useEffect(() => {
     const loadGoogleMaps = () => {
-      // Check if Google Maps is already loaded
       if (window.google && window.google.maps) {
         setMapLoaded(true);
         return;
       }
 
-      // Check if script is already being loaded or exists
       const existingScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
       if (existingScript) {
-        // Script already exists, wait for it to load
         if (window.google && window.google.maps) {
           setMapLoaded(true);
         } else {
-          // Wait for the existing script to load
           existingScript.addEventListener('load', () => setMapLoaded(true));
         }
         return;
       }
 
-      // Load the script only if it doesn't exist
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=geometry`;
       script.async = true;
       script.defer = true;
       script.onload = () => setMapLoaded(true);
       script.onerror = () => console.error('Failed to load Google Maps API');
-      
-      // Add a unique identifier to prevent duplicate loading
       script.setAttribute('data-google-maps', 'true');
-      
       document.head.appendChild(script);
     };
 
     loadGoogleMaps();
   }, []);
 
-  // Add this useEffect after your existing useEffects:
   useEffect(() => {
     const handleResize = () => {
       if (mapLoaded && showMap && journeyData) {
@@ -88,43 +76,34 @@ const CompleteVisiwiseTracker = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [mapLoaded, showMap, journeyData]);
 
-  // Get coordinates for port name using OpenAI
+  // Get coordinates using your API route
   const getPortCoordinates = async (portName) => {
     try {
       console.log(`🌍 Getting coordinates for port: ${portName}`);
 
-      const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch('/api/port-coordinates', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a maritime logistics expert. Given a port name, provide its exact coordinates in the format "longitude,latitude" (e.g., "101.3984,3.0064"). Respond with ONLY the coordinates in this exact format with no additional text. For compound port names like "Northport/Pt Klang", use the main port coordinates.'
-            },
-            {
-              role: 'user',
-              content: `What are the coordinates for port: ${portName}`
-            }
-          ],
-          max_tokens: 20,
-          temperature: 0.1
-        })
+        body: JSON.stringify({ 
+          portName: portName.trim() 
+        }),
       });
 
-      if (!openaiResponse.ok) {
-        throw new Error(`OpenAI API error: ${openaiResponse.status}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`API error: ${errorData.error || response.statusText}`);
       }
 
-      const openaiData = await openaiResponse.json();
-      const coordinates = openaiData.choices[0]?.message?.content?.trim();
+      const data = await response.json();
       
-      console.log('🔍 Found coordinates for', portName, ':', coordinates);
-      return coordinates;
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get coordinates');
+      }
+
+      console.log('✅ Found coordinates for', portName, ':', data.coordinates);
+      return data.coordinates;
       
     } catch (err) {
       console.error('❌ Failed to get coordinates for port:', err);
@@ -132,16 +111,14 @@ const CompleteVisiwiseTracker = () => {
     }
   };
 
-  // Plan route using searoute-ts package (replacing Searoutes API)
-  const planRouteWithSearchouteTS = async (fromCoords, toCoords, routeType = 'route') => {
+  // Plan route using searoute-ts package
+  const planRouteWithSeaRouteTS = async (fromCoords, toCoords, routeType = 'route') => {
     try {
-      console.log(`🗺️ Planning ${routeType} from ${fromCoords} to ${toCoords} using searoute-ts`);
+      console.log(`🗺️ Planning ${routeType} from ${fromCoords} to ${toCoords}`);
 
-      // Parse coordinates
       const [fromLng, fromLat] = fromCoords.split(',').map(Number);
       const [toLng, toLat] = toCoords.split(',').map(Number);
 
-      // Create GeoJSON points for searoute-ts
       const origin = {
         type: 'Feature',
         properties: {},
@@ -160,11 +137,10 @@ const CompleteVisiwiseTracker = () => {
         }
       };
 
-      // Use the sea route calculation (either client-side or server-side)
       let routeResult;
       
       try {
-        // Try server-side first
+        // Try server-side route calculation first
         const response = await fetch('/api/searoute', {
           method: 'POST',
           headers: {
@@ -180,38 +156,39 @@ const CompleteVisiwiseTracker = () => {
         if (response.ok) {
           const data = await response.json();
           routeResult = data.route;
+          console.log(`✅ ${routeType} planned via server-side API`);
         } else {
           throw new Error('Server-side route calculation failed');
         }
       } catch (serverError) {
-        console.log('Server-side failed, trying client-side:', serverError.message);
+        console.log('🔄 Server-side failed, trying client-side...');
         
         // Fallback to client-side calculation
         const { default: seaRoute } = await import('searoute-ts');
         routeResult = seaRoute(origin, destination, 'kilometers');
+        console.log(`✅ ${routeType} planned via client-side searoute-ts`);
       }
 
-      // Convert to format similar to the original Searoutes API response
+      // Format the route data consistently
       const formattedRoute = {
         features: [
           {
             type: 'Feature',
             geometry: routeResult.geometry,
             properties: {
-              distance: routeResult.properties.length * 1000, // Convert km to meters
-              duration: routeResult.properties.length * 1000 * 36, // Rough estimate: 1 km = 36 seconds at 100 km/h
+              distance: routeResult.properties.length * 1000, // Convert to meters
+              duration: routeResult.properties.length * 1000 * 36, // Estimate duration
               ...routeResult.properties
             }
           }
         ],
         properties: {
-          distance: routeResult.properties.length * 1000, // Convert km to meters
-          duration: routeResult.properties.length * 1000 * 36, // Rough estimate
+          distance: routeResult.properties.length * 1000,
+          duration: routeResult.properties.length * 1000 * 36,
           units: 'kilometers'
         }
       };
 
-      console.log(`✅ ${routeType} route planned successfully with searoute-ts`);
       return formattedRoute;
       
     } catch (err) {
@@ -220,11 +197,11 @@ const CompleteVisiwiseTracker = () => {
     }
   };
 
-  // Process complete vessel journey with route planning using searoute-ts
+  // Process complete vessel journey with route planning - OPTIMIZED VERSION
   const processVesselJourney = async (shipmentData) => {
     setProcessingRoutes(true);
     try {
-      console.log('🚢 Processing complete vessel journey with searoute-ts...');
+      console.log('🚢 Processing complete vessel journey...');
       
       const tracking = shipmentData.containerTracking || 
                       shipmentData.blTracking || 
@@ -272,36 +249,63 @@ const CompleteVisiwiseTracker = () => {
       }
 
       const currentCoords = `${vesselPosition.longitude},${vesselPosition.latitude}`;
+      console.log('🎯 Current vessel coordinates:', currentCoords);
       
       let originCoords = null;
       let destinationCoords = null;
 
-      if (portOfLoading?.unlocodeName) {
+      // Check if we already have coordinates from vessel tracking data
+      const hasOriginCoords = portOfLoading?.coordinates || portOfLoading?.latitude;
+      const hasDestCoords = portOfDischarge?.coordinates || portOfDischarge?.latitude;
+
+      if (hasOriginCoords) {
+        if (portOfLoading.coordinates) {
+          originCoords = portOfLoading.coordinates;
+        } else if (portOfLoading.latitude && portOfLoading.longitude) {
+          originCoords = `${portOfLoading.longitude},${portOfLoading.latitude}`;
+        }
+        console.log('✅ Using existing origin coordinates:', originCoords);
+      } else if (portOfLoading?.unlocodeName) {
+        console.log('🔍 Getting origin coordinates for:', portOfLoading.unlocodeName);
         originCoords = await getPortCoordinates(portOfLoading.unlocodeName);
       }
 
-      if (portOfDischarge?.unlocodeName) {
+      if (hasDestCoords) {
+        if (portOfDischarge.coordinates) {
+          destinationCoords = portOfDischarge.coordinates;
+        } else if (portOfDischarge.latitude && portOfDischarge.longitude) {
+          destinationCoords = `${portOfDischarge.longitude},${portOfDischarge.latitude}`;
+        }
+        console.log('✅ Using existing destination coordinates:', destinationCoords);
+      } else if (portOfDischarge?.unlocodeName) {
+        console.log('🔍 Getting destination coordinates for:', portOfDischarge.unlocodeName);
         destinationCoords = await getPortCoordinates(portOfDischarge.unlocodeName);
       }
 
       let routes = {};
 
-      // Calculate traveled route using searoute-ts
-      if (originCoords) {
+      // Plan traveled route
+      if (originCoords && currentCoords) {
         try {
-          routes.traveled = await planRouteWithSearchouteTS(originCoords, currentCoords, 'traveled route');
+          console.log('🗺️ Planning traveled route...');
+          routes.traveled = await planRouteWithSeaRouteTS(originCoords, currentCoords, 'traveled route');
         } catch (err) {
-          console.warn('Could not plan traveled route:', err.message);
+          console.warn('⚠️ Could not plan traveled route:', err.message);
         }
+      } else {
+        console.log('⏭️ Skipping traveled route - missing coordinates');
       }
 
-      // Calculate prediction route using searoute-ts
-      if (destinationCoords) {
+      // Plan prediction route
+      if (destinationCoords && currentCoords) {
         try {
-          routes.prediction = await planRouteWithSearchouteTS(currentCoords, destinationCoords, 'prediction route');
+          console.log('🗺️ Planning prediction route...');
+          routes.prediction = await planRouteWithSeaRouteTS(currentCoords, destinationCoords, 'prediction route');
         } catch (err) {
-          console.warn('Could not plan prediction route:', err.message);
+          console.warn('⚠️ Could not plan prediction route:', err.message);
         }
+      } else {
+        console.log('⏭️ Skipping prediction route - missing coordinates');
       }
 
       const journey = {
@@ -331,6 +335,13 @@ const CompleteVisiwiseTracker = () => {
         },
         containers: shipmentData.blTracking ? tracking.containers : null
       };
+
+      console.log('✅ Journey data prepared:', {
+        vessel: journey.vessel.name,
+        hasOriginCoords: !!originCoords,
+        hasDestCoords: !!destinationCoords,
+        routesPlanned: Object.keys(routes).length
+      });
 
       setJourneyData(journey);
       setShowMap(true);
@@ -410,7 +421,7 @@ const CompleteVisiwiseTracker = () => {
               </defs>
               <path d="M20 0C12.268 0 6 6.268 6 14c0 10.5 14 32 14 32s14-21.5 14-32c0-7.732-6.268-14-14-14z" fill="#10B981" filter="url(#shadow)"/>
               <circle cx="20" cy="14" r="8" fill="#ffffff"/>
-              <text x="20" y="18" text-anchor="middle" fill="#10B981" font-size="8" font-weight="bold">TS1</text>
+              <text x="20" y="18" text-anchor="middle" fill="#10B981" font-size="8" font-weight="bold">POL</text>
             </svg>
           `),
           scaledSize: new window.google.maps.Size(40, 50),
@@ -559,11 +570,13 @@ const CompleteVisiwiseTracker = () => {
 
       // Animate the arrows
       let count = 0;
-      setInterval(() => {
+      const animateArrows = setInterval(() => {
         count = (count + 1) % 200;
         const icons = predictionPolyline.get('icons');
-        icons[0].offset = (count / 2) + '%';
-        predictionPolyline.set('icons', icons);
+        if (icons && icons[0]) {
+          icons[0].offset = (count / 2) + '%';
+          predictionPolyline.set('icons', icons);
+        }
       }, 50);
     }
 
@@ -575,10 +588,9 @@ const CompleteVisiwiseTracker = () => {
     }
   };
 
-  // Replace the map initialization useEffect with this:
+  // Map initialization useEffects
   useEffect(() => {
     if (mapLoaded && showMap && journeyData) {
-      // Add a small delay to ensure DOM is ready
       const timer = setTimeout(() => {
         initializeMap();
       }, 200);
@@ -587,7 +599,6 @@ const CompleteVisiwiseTracker = () => {
     }
   }, [mapLoaded, showMap, journeyData]);
 
-  // Add this additional useEffect for handling layout changes
   useEffect(() => {
     if (mapLoaded && showMap && journeyData) {
       const observer = new ResizeObserver(() => {
@@ -827,513 +838,512 @@ const CompleteVisiwiseTracker = () => {
           setError(`No tracking data found for this ${trackingData.trackingType.replace('Tracking', '').toLowerCase()}.`);
           setPolling(false);
           setLoading(false);
-          return;
-        }
+          return
+          }
         
         const status = tracking.trackStatus?.status;
+        
         if (status === 'Track-Succeeded') {
-         setPolling(false);
-         setLoading(false);
-         await processVesselJourney(shipmentData);
-         return;
-       } else if (status === 'Track-Failed') {
-         setError(`Tracking failed: ${tracking.trackStatus.exception || 'Invalid reference'}`);
-         setPolling(false);
-         setLoading(false);
-         return;
-       } else if (status === 'Is-Tracking') {
-         let hasVesselData = false;
-         
-         if (shipmentData.containerTracking?.currentVessel?.position) {
-           hasVesselData = true;
-         } else if (shipmentData.blTracking?.containers?.some(c => c.currentVessel?.position)) {
-           hasVesselData = true;
-         }
-         
-         if (hasVesselData && attempts >= 3) {
-           console.log('✅ Found vessel data while tracking, proceeding...');
-           setPolling(false);
-           setLoading(false);
-           await processVesselJourney(shipmentData);
-           return;
-         }
-       }
+          setPolling(false);
+          setLoading(false);
+          await processVesselJourney(shipmentData);
+          return;
+        } else if (status === 'Track-Failed') {
+          setError(`Tracking failed: ${tracking.trackStatus.exception || 'Invalid reference'}`);
+          setPolling(false);
+          setLoading(false);
+          return;
+        } else if (status === 'Is-Tracking') {
+          let hasVesselData = false;
+          
+          if (shipmentData.containerTracking?.currentVessel?.position) {
+            hasVesselData = true;
+          } else if (shipmentData.blTracking?.containers?.some(c => c.currentVessel?.position)) {
+            hasVesselData = true;
+          }
+          
+          if (hasVesselData && attempts >= 3) {
+            console.log('✅ Found vessel data while tracking, proceeding...');
+            setPolling(false);
+            setLoading(false);
+            await processVesselJourney(shipmentData);
+            return;
+          }
+        }
 
-       attempts++;
-       if (attempts < maxAttempts) {
-         setTimeout(poll, 3000);
-       } else {
-         if (tracking.trackStatus?.status === 'Is-Tracking') {
-           try {
-             await processVesselJourney(shipmentData);
-             setPolling(false);
-             setLoading(false);
-             return;
-           } catch (err) {
-             console.log('No usable data found');
-           }
-         }
-         
-         setError('Tracking timeout - please try again');
-         setPolling(false);
-         setLoading(false);
-       }
-       
-     } catch (err) {
-       setError(err.message);
-       setPolling(false);
-       setLoading(false);
-     }
-   };
-   
-   poll();
- };
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 3000);
+        } else {
+          if (tracking.trackStatus?.status === 'Is-Tracking') {
+            try {
+              await processVesselJourney(shipmentData);
+              setPolling(false);
+              setLoading(false);
+              return;
+            } catch (err) {
+              console.log('No usable data found');
+            }
+          }
+          
+          setError('Tracking timeout - please try again');
+          setPolling(false);
+          setLoading(false);
+        }
+        
+      } catch (err) {
+        setError(err.message);
+        setPolling(false);
+        setLoading(false);
+      }
+    };
+    
+    poll();
+  };
 
- // Format distance and duration
- const formatDistance = (meters) => {
-   if (!meters) return 'N/A';
-   const km = meters / 1000;
-   return `${km.toFixed(0)} km`;
- };
+  // Format distance and duration
+  const formatDistance = (meters) => {
+    if (!meters) return 'N/A';
+    const km = meters / 1000;
+    return `${km.toFixed(0)} km`;
+  };
 
- const formatDuration = (milliseconds) => {
-   if (!milliseconds) return 'N/A';
-   const hours = milliseconds / (1000 * 60 * 60);
-   const days = Math.floor(hours / 24);
-   const remainingHours = Math.floor(hours % 24);
-   
-   if (days > 0) {
-     return `${days}d ${remainingHours}h`;
-   } else {
-     return `${Math.round(hours)}h`;
-   }
- };
+  const formatDuration = (milliseconds) => {
+    if (!milliseconds) return 'N/A';
+    const hours = milliseconds / (1000 * 60 * 60);
+    const days = Math.floor(hours / 24);
+    const remainingHours = Math.floor(hours % 24);
+    
+    if (days > 0) {
+      return `${days}d ${remainingHours}h`;
+    } else {
+      return `${Math.round(hours)}h`;
+    }
+  };
 
- return (
-   <div className="min-h-screen w-full bg-gradient-to-br from-emerald-50 to-teal-50">
- {/* Header */}
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-br from-emerald-50 to-teal-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b -mx-4 md:-mx-6 -mt-4 md:-mt-6 mb-4 md:mb-6">
+        <div className="px-4 md:px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">🚢</span>
+              </div>
+              <h1 className="text-xl font-semibold text-gray-900">Maritime Journey Tracker</h1>
+            </div>
+            {journeyData && (
+              <button
+                onClick={() => {
+                  setShowForm(true);
+                  setShowMap(false);
+                  setJourneyData(null);
+                  setShipment(null);
+                }}
+                className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                New Search
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
- <div className="bg-white shadow-sm border-b -mx-4 md:-mx-6 -mt-4 md:-mt-6 mb-4 md:mb-6">
-   <div className="px-4 md:px-6 py-4">
-     <div className="flex items-center justify-between">
-       <div className="flex items-center space-x-3">
-         <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
-           <span className="text-white font-bold text-sm">🚢</span>
-         </div>
-         <h1 className="text-xl font-semibold text-gray-900">Maritime Journey Tracker</h1>
-       </div>
-       {journeyData && (
-         <button
-           onClick={() => {
-             setShowForm(true);
-             setShowMap(false);
-             setJourneyData(null);
-             setShipment(null);
-           }}
-           className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-         >
-           New Search
-         </button>
-       )}
-     </div>
-   </div>
- </div>
+      {/* Main Content */}
+      <div className="w-full">
+        {showForm ? (
+          /* Beautiful Form View */
+          <div className="w-full">
+            <div className="text-center mb-8 md:mb-12">
+              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Track a Container</h1>
+              <p className="text-base md:text-lg text-gray-600">Choose your tracking method below</p>
+            </div>
 
- {/* Main Content */}
- <div className="w-full">
-   {showForm ? (
-     /* Beautiful Form View */
-     <div className="w-full">
-       <div className="text-center mb-8 md:mb-12">
-         <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Track a Container</h1>
-         <p className="text-base md:text-lg text-gray-600">Choose your tracking method below</p>
-       </div>
+            {/* Tracking Type Selection - Beautiful Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 mb-8 md:mb-12">
+              {/* Booking Card */}
+              <div 
+                onClick={() => setTrackingData({...trackingData, trackingType: 'BookingTracking'})}
+                className={`relative p-4 md:p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 ${
+                  trackingData.trackingType === 'BookingTracking' 
+                    ? 'border-emerald-500 bg-emerald-50 shadow-lg' 
+                    : 'border-gray-200 bg-white hover:border-emerald-300'
+                }`}
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <svg className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm md:text-base font-semibold text-gray-900 mb-1">Booking</h3>
+                  <p className="text-xs text-gray-500">Booking reference</p>
+                </div>
+              </div>
 
-       {/* Tracking Type Selection - Beautiful Cards */}
-       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 mb-8 md:mb-12">
-         {/* Booking Card */}
-         <div 
-           onClick={() => setTrackingData({...trackingData, trackingType: 'BookingTracking'})}
-           className={`relative p-4 md:p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 ${
-             trackingData.trackingType === 'BookingTracking' 
-               ? 'border-emerald-500 bg-emerald-50 shadow-lg' 
-               : 'border-gray-200 bg-white hover:border-emerald-300'
-           }`}
-         >
-           <div className="flex flex-col items-center text-center">
-             <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-emerald-100 flex items-center justify-center">
-               <svg className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/>
-               </svg>
-             </div>
-             <h3 className="text-sm md:text-base font-semibold text-gray-900 mb-1">Booking</h3>
-             <p className="text-xs text-gray-500">Booking reference</p>
-           </div>
-         </div>
+              {/* Container Card - Selected by default */}
+              <div 
+                onClick={() => setTrackingData({...trackingData, trackingType: 'ContainerTracking'})}
+                className={`relative p-4 md:p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 ${
+                  trackingData.trackingType === 'ContainerTracking' 
+                    ? 'border-emerald-500 bg-emerald-50 shadow-lg' 
+                    : 'border-gray-200 bg-white hover:border-emerald-300'
+                }`}
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <svg className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M2 6h20v2H2V6zm0 5h20v6H2v-6zm2 2v2h16v-2H4z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm md:text-base font-semibold text-gray-900 mb-1">Container</h3>
+                  <p className="text-xs text-gray-500">Container number</p>
+                </div>
+                {trackingData.trackingType === 'ContainerTracking' && (
+                  <div className="absolute -top-1 -right-1 w-5 h-5 md:w-6 md:h-6 bg-emerald-500 rounded-full flex items-center justify-center">
+                    <svg className="w-3 h-3 md:w-4 md:h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+                    </svg>
+                  </div>
+                )}
+              </div>
 
-         {/* Container Card - Selected by default */}
-         <div 
-           onClick={() => setTrackingData({...trackingData, trackingType: 'ContainerTracking'})}
-           className={`relative p-4 md:p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 ${
-             trackingData.trackingType === 'ContainerTracking' 
-               ? 'border-emerald-500 bg-emerald-50 shadow-lg' 
-               : 'border-gray-200 bg-white hover:border-emerald-300'
-           }`}
-         >
-           <div className="flex flex-col items-center text-center">
-             <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-emerald-100 flex items-center justify-center">
-               <svg className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M2 6h20v2H2V6zm0 5h20v6H2v-6zm2 2v2h16v-2H4z"/>
-               </svg>
-             </div>
-             <h3 className="text-sm md:text-base font-semibold text-gray-900 mb-1">Container</h3>
-             <p className="text-xs text-gray-500">Container number</p>
-           </div>
-           {trackingData.trackingType === 'ContainerTracking' && (
-             <div className="absolute -top-1 -right-1 w-5 h-5 md:w-6 md:h-6 bg-emerald-500 rounded-full flex items-center justify-center">
-               <svg className="w-3 h-3 md:w-4 md:h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-               </svg>
-             </div>
-           )}
-         </div>
+              {/* Multiple Shipments Card */}
+              <div className="relative p-4 md:p-6 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-50">
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <svg className="w-6 h-6 md:w-8 md:h-8 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 3h6v6H3V3zm8 0h6v6h-6V3zm-8 8h6v6H3v-6zm8 0h6v6h-6v-6z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-1">Multiple Shipments</h3>
+                  <p className="text-xs text-gray-400">Coming soon</p>
+                </div>
+              </div>
 
-         {/* Multiple Shipments Card */}
-         <div className="relative p-4 md:p-6 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-50">
-           <div className="flex flex-col items-center text-center">
-             <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
-               <svg className="w-6 h-6 md:w-8 md:h-8 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M3 3h6v6H3V3zm8 0h6v6h-6V3zm-8 8h6v6H3v-6zm8 0h6v6h-6v-6z"/>
-               </svg>
-             </div>
-             <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-1">Multiple Shipments</h3>
-             <p className="text-xs text-gray-400">Coming soon</p>
-           </div>
-         </div>
+              {/* Bill of Lading Card */}
+              <div 
+                onClick={() => setTrackingData({...trackingData, trackingType: 'BLTracking'})}
+                className={`relative p-4 md:p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 ${
+                  trackingData.trackingType === 'BLTracking' 
+                    ? 'border-emerald-500 bg-emerald-50 shadow-lg' 
+                    : 'border-gray-200 bg-white hover:border-emerald-300'
+                }`}
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <svg className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM6 20V4h7v5h5v11H6z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm md:text-base font-semibold text-gray-900 mb-1">Bill of Lading</h3>
+                  <p className="text-xs text-gray-500">BL number</p>
+                </div>
+              </div>
 
-         {/* Bill of Lading Card */}
-         <div 
-           onClick={() => setTrackingData({...trackingData, trackingType: 'BLTracking'})}
-           className={`relative p-4 md:p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 ${
-             trackingData.trackingType === 'BLTracking' 
-               ? 'border-emerald-500 bg-emerald-50 shadow-lg' 
-               : 'border-gray-200 bg-white hover:border-emerald-300'
-           }`}
-         >
-           <div className="flex flex-col items-center text-center">
-             <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-emerald-100 flex items-center justify-center">
-               <svg className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM6 20V4h7v5h5v11H6z"/>
-               </svg>
-             </div>
-             <h3 className="text-sm md:text-base font-semibold text-gray-900 mb-1">Bill of Lading</h3>
-             <p className="text-xs text-gray-500">BL number</p>
-           </div>
-         </div>
+              {/* Vessel Card */}
+              <div className="relative p-4 md:p-6 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-50">
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <svg className="w-6 h-6 md:w-8 md:h-8 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-1">Vessel</h3>
+                  <p className="text-xs text-gray-400">Coming soon</p>
+                </div>
+              </div>
 
-         {/* Vessel Card */}
-         <div className="relative p-4 md:p-6 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-50">
-           <div className="flex flex-col items-center text-center">
-             <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
-               <svg className="w-6 h-6 md:w-8 md:h-8 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/>
-               </svg>
-             </div>
-             <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-1">Vessel</h3>
-             <p className="text-xs text-gray-400">Coming soon</p>
-           </div>
-         </div>
+              {/* Order Card */}
+              <div className="relative p-4 md:p-6 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-50">
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <svg className="w-6 h-6 md:w-8 md:h-8 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h4a1 1 0 011 1v1a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4zM5 8h14l-1 8H6L5 8z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-1">Order</h3>
+                  <p className="text-xs text-gray-400">Coming soon</p>
+                </div>
+              </div>
+            </div>
 
-         {/* Order Card */}
-         <div className="relative p-4 md:p-6 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-50">
-           <div className="flex flex-col items-center text-center">
-             <div className="w-12 h-12 md:w-16 md:h-16 mb-3 md:mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
-               <svg className="w-6 h-6 md:w-8 md:h-8 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h4a1 1 0 011 1v1a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4zM5 8h14l-1 8H6L5 8z"/>
-               </svg>
-             </div>
-             <h3 className="text-sm md:text-base font-semibold text-gray-500 mb-1">Order</h3>
-             <p className="text-xs text-gray-400">Coming soon</p>
-           </div>
-         </div>
-       </div>
+            {/* Search Form */}
+            <div className="w-full max-w-2xl mx-auto">
+              <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+                {/* Auto Detect Dropdown */}
+                <div className="mb-6">
+                  <div className="relative">
+                    <select 
+                      value={trackingData.autoDetect ? 'auto' : trackingData.shippingLine}
+                      onChange={(e) => {
+                        if (e.target.value === 'auto') {
+                          setTrackingData({...trackingData, autoDetect: true, shippingLine: ''});
+                        } else {
+                          setTrackingData({...trackingData, autoDetect: false, shippingLine: e.target.value});
+                        }
+                      }}
+                      className="w-full px-4 md:px-6 py-3 md:py-4 text-base md:text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none appearance-none bg-white transition-all"
+                    >
+                      <option value="auto">⭐ Auto Detect</option>
+                      <optgroup label="Container Lines">
+                        {availableLines.container?.map((line) => (
+                          <option key={line.keyname} value={line.keyname}>
+                            {line.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {trackingData.trackingType === 'BLTracking' && (
+                        <optgroup label="BL Lines">
+                          {availableLines.bl?.map((line) => (
+                            <option key={line.keyname} value={line.keyname}>
+                              {line.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {trackingData.trackingType === 'BookingTracking' && (
+                        <optgroup label="Booking Lines">
+                          {availableLines.booking?.map((line) => (
+                            <option key={line.keyname} value={line.keyname}>
+                              {line.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                      <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
 
-       {/* Search Form */}
-       <div className="w-full max-w-2xl mx-auto">
-         <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
-           {/* Auto Detect Dropdown - MOVED UP */}
-           <div className="mb-6">
-             <div className="relative">
-               <select 
-                 value={trackingData.autoDetect ? 'auto' : trackingData.shippingLine}
-                 onChange={(e) => {
-                   if (e.target.value === 'auto') {
-                     setTrackingData({...trackingData, autoDetect: true, shippingLine: ''});
-                   } else {
-                     setTrackingData({...trackingData, autoDetect: false, shippingLine: e.target.value});
-                   }
-                 }}
-                 className="w-full px-4 md:px-6 py-3 md:py-4 text-base md:text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none appearance-none bg-white transition-all"
-               >
-                 <option value="auto">⭐ Auto Detect</option>
-                 <optgroup label="Container Lines">
-                   {availableLines.container?.map((line) => (
-                     <option key={line.keyname} value={line.keyname}>
-                       {line.name}
-                     </option>
-                   ))}
-                 </optgroup>
-                 {trackingData.trackingType === 'BLTracking' && (
-                   <optgroup label="BL Lines">
-                     {availableLines.bl?.map((line) => (
-                       <option key={line.keyname} value={line.keyname}>
-                         {line.name}
-                       </option>
-                     ))}
-                   </optgroup>
-                 )}
-                 {trackingData.trackingType === 'BookingTracking' && (
-                   <optgroup label="Booking Lines">
-                     {availableLines.booking?.map((line) => (
-                       <option key={line.keyname} value={line.keyname}>
-                         {line.name}
-                       </option>
-                     ))}
-                   </optgroup>
-                 )}
-               </select>
-               <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                 <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
-                 </svg>
-               </div>
-             </div>
-           </div>
+                {/* Reference Input */}
+                <div className="mb-6 md:mb-8">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={trackingData.reference}
+                      onChange={(e) => setTrackingData({...trackingData, reference: e.target.value})}
+                      placeholder={
+                        trackingData.trackingType === 'ContainerTracking' ? 'Container Number, Ex. DFSU7162007' :
+                        trackingData.trackingType === 'BLTracking' ? 'Bill of Lading Number, Ex. HLCUIZ1250599742' :
+                        'Booking Reference Number'
+                      }
+                      className="w-full px-4 md:px-6 py-3 md:py-4 text-base md:text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
+                    />
+                  </div>
+                </div>
 
-           {/* Reference Input - MOVED DOWN */}
-           <div className="mb-6 md:mb-8">
-             <div className="relative">
-               <input
-                 type="text"
-                 value={trackingData.reference}
-                 onChange={(e) => setTrackingData({...trackingData, reference: e.target.value})}
-                 placeholder={
-                   trackingData.trackingType === 'ContainerTracking' ? 'Container Number, Ex. DFSU7162007' :
-                   trackingData.trackingType === 'BLTracking' ? 'Bill of Lading Number, Ex. HLCUIZ1250599742' :
-                   'Booking Reference Number'
-                 }
-                 className="w-full px-4 md:px-6 py-3 md:py-4 text-base md:text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
-               />
-             </div>
-           </div>
+                {/* Error Display */}
+                {error && (
+                  <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <p className="text-red-800 text-sm">{error}</p>
+                  </div>
+                )}
 
-           {/* Error Display */}
-           {error && (
-             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
-               <p className="text-red-800 text-sm">{error}</p>
-             </div>
-           )}
+                {/* Track Button */}
+                <button
+                  onClick={createShipment}
+                  disabled={loading || !trackingData.reference}
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3 md:py-4 px-6 md:px-8 rounded-xl font-semibold text-base md:text-lg hover:from-emerald-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-[1.02] shadow-lg"
+                >
+                  {loading ? (
+                    <div className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-5 w-5 md:h-6 md:w-6 border-b-2 border-white mr-3"></div>
+                      {polling ? 'Processing journey...' : 'Tracking...'}
+                    </div>
+                  ) : (
+                    'Track Container'
+                  )}
+                </button>
 
-           {/* Track Button */}
-           <button
-             onClick={createShipment}
-             disabled={loading || !trackingData.reference}
-             className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3 md:py-4 px-6 md:px-8 rounded-xl font-semibold text-base md:text-lg hover:from-emerald-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-[1.02] shadow-lg"
-           >
-             {loading ? (
-               <div className="flex items-center justify-center">
-                 <div className="animate-spin rounded-full h-5 w-5 md:h-6 md:w-6 border-b-2 border-white mr-3"></div>
-                 {polling ? 'Processing journey...' : 'Tracking...'}
-               </div>
-             ) : (
-               'Track Container'
-             )}
-           </button>
+                {/* Loading Status */}
+                {(loading || processingRoutes) && (
+                  <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-600 mr-3"></div>
+                      <div className="text-sm">
+                        {processingRoutes ? (
+                          <div>
+                            <p className="font-medium text-emerald-900">Building journey visualization...</p>
+                            <p className="text-emerald-700">Getting coordinates and planning routes</p>
+                          </div>
+                        ) : polling ? (
+                          <p className="text-emerald-800">Getting tracking data...</p>
+                        ) : (
+                          <p className="text-emerald-800">Initializing tracking...</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Map View */
+          <div className="flex flex-col xl:flex-row gap-4 md:gap-6 min-h-[600px] xl:h-[calc(100vh-200px)]">
+            {/* Left Panel - Journey Details */}
+            <div className="w-full xl:w-80 2xl:w-96 bg-white rounded-xl shadow-lg p-4 md:p-6 overflow-y-auto max-h-96 xl:max-h-none">
+              <div className="space-y-4 md:space-y-6">
+                {/* Vessel Info */}
+                {journeyData && (
+                  <div>
+                    <h3 className="text-base md:text-lg font-bold text-gray-900 mb-4">Current Status</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center p-3 bg-emerald-50 rounded-lg">
+                        <div className="w-10 h-10 bg-emerald-600 rounded-full flex items-center justify-center mr-3">
+                          <span className="text-white font-bold">🚢</span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm md:text-base">{journeyData.vessel.name}</p>
+                          <p className="text-xs md:text-sm text-gray-600">{journeyData.vessel.container}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2 text-xs md:text-sm">
+                        <div className="p-2 bg-gray-50 rounded">
+                          <p className="text-gray-600">Shipping Line</p>
+                          <p className="font-medium">{journeyData.vessel.shippingLine.name}</p>
+                        </div>
+                        <div className="p-2 bg-gray-50 rounded">
+                          <p className="text-gray-600">Status</p>
+                          <p className="font-medium text-emerald-600">{journeyData.tracking.status}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-           {/* Loading Status */}
-           {(loading || processingRoutes) && (
-             <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-               <div className="flex items-center">
-                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-600 mr-3"></div>
-                 <div className="text-sm">
-                   {processingRoutes ? (
-                     <div>
-                       <p className="font-medium text-emerald-900">Building journey visualization with searoute-ts...</p>
-                       <p className="text-emerald-700">Getting coordinates and planning sea routes</p>
-                     </div>
-                   ) : polling ? (
-                     <p className="text-emerald-800">Getting tracking data...</p>
-                   ) : (
-                     <p className="text-emerald-800">Initializing tracking...</p>
-                   )}
-                 </div>
-               </div>
-             </div>
-           )}
-         </div>
-       </div>
-     </div>
-   ) : (
-     /* Map View - Adjusted for dashboard layout */
-<div className="flex flex-col xl:flex-row gap-4 md:gap-6 min-h-[600px] xl:h-[calc(100vh-200px)]">
-       {/* Left Panel - Journey Details */}
- <div className="w-full xl:w-80 2xl:w-96 bg-white rounded-xl shadow-lg p-4 md:p-6 overflow-y-auto max-h-96 xl:max-h-none">
-         <div className="space-y-4 md:space-y-6">
-           {/* Vessel Info */}
-           {journeyData && (
-             <div>
-               <h3 className="text-base md:text-lg font-bold text-gray-900 mb-4">Current Status</h3>
-               <div className="space-y-3">
-                 <div className="flex items-center p-3 bg-emerald-50 rounded-lg">
-                   <div className="w-10 h-10 bg-emerald-600 rounded-full flex items-center justify-center mr-3">
-                     <span className="text-white font-bold">🚢</span>
-                   </div>
-                   <div>
-                     <p className="font-medium text-gray-900 text-sm md:text-base">{journeyData.vessel.name}</p>
-                     <p className="text-xs md:text-sm text-gray-600">{journeyData.vessel.container}</p>
-                   </div>
-                 </div>
-                 
-                 <div className="grid grid-cols-2 gap-2 text-xs md:text-sm">
-                   <div className="p-2 bg-gray-50 rounded">
-                     <p className="text-gray-600">Shipping Line</p>
-                     <p className="font-medium">{journeyData.vessel.shippingLine.name}</p>
-                   </div>
-                   <div className="p-2 bg-gray-50 rounded">
-                     <p className="text-gray-600">Status</p>
-                     <p className="font-medium text-emerald-600">{journeyData.tracking.status}</p>
-                   </div>
-                 </div>
-               </div>
-             </div>
-           )}
+                {/* Journey Progress */}
+                {journeyData && (
+                  <div>
+                    <h3 className="text-base md:text-lg font-bold text-gray-900 mb-4">Journey Progress</h3>
+                    
+                    <div className="relative">
+                      <div className="flex items-center mb-4">
+                        <div className="w-4 h-4 bg-emerald-500 rounded-full mr-3 relative z-10"></div>
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm md:text-base">{journeyData.ports.loading.name}</p>
+                          <p className="text-xs md:text-sm text-gray-600">Port of Loading</p>
+                        </div>
+                      </div>
+                      
+                      {journeyData.routes.traveled && (
+                        <div className="ml-7 mb-4 p-3 bg-emerald-50 rounded-lg border-l-4 border-emerald-500">
+                          <p className="text-xs md:text-sm font-medium text-emerald-800">Completed Journey</p>
+                          <div className="flex justify-between text-xs md:text-sm text-emerald-700 mt-1">
+                            <span>{formatDistance(journeyData.routes.traveled.properties?.distance)}</span>
+                            <span>{formatDuration(journeyData.routes.traveled.properties?.duration)}</span>
+                          </div>
+                        </div>
+                      )}
 
-           {/* Journey Progress */}
-           {journeyData && (
-             <div>
-               <h3 className="text-base md:text-lg font-bold text-gray-900 mb-4">Journey Progress</h3>
-               
-               <div className="relative">
-                 <div className="flex items-center mb-4">
-                   <div className="w-4 h-4 bg-emerald-500 rounded-full mr-3 relative z-10"></div>
-                   <div>
-                     <p className="font-medium text-gray-900 text-sm md:text-base">{journeyData.ports.loading.name}</p>
-                     <p className="text-xs md:text-sm text-gray-600">Port of Loading</p>
-                   </div>
-                 </div>
-                 
-                 {journeyData.routes.traveled && (
-                   <div className="ml-7 mb-4 p-3 bg-emerald-50 rounded-lg border-l-4 border-emerald-500">
-                     <p className="text-xs md:text-sm font-medium text-emerald-800">Completed Journey</p>
-                     <div className="flex justify-between text-xs md:text-sm text-emerald-700 mt-1">
-                       <span>{formatDistance(journeyData.routes.traveled.properties?.distance)}</span>
-                       <span>{formatDuration(journeyData.routes.traveled.properties?.duration)}</span>
-                     </div>
-                   </div>
-                 )}
+                      <div className="flex items-center mb-4">
+                        <div className="w-4 h-4 bg-teal-600 rounded-full mr-3 relative z-10 animate-pulse"></div>
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm md:text-base">Current Position</p>
+                          <p className="text-xs md:text-sm text-gray-600">
+                            {journeyData.vessel.position.latitude.toFixed(3)}°, {journeyData.vessel.position.longitude.toFixed(3)}°
+                          </p>
+                        </div>
+                      </div>
 
-                 <div className="flex items-center mb-4">
-                   <div className="w-4 h-4 bg-teal-600 rounded-full mr-3 relative z-10 animate-pulse"></div>
-                   <div>
-                     <p className="font-medium text-gray-900 text-sm md:text-base">Current Position</p>
-                     <p className="text-xs md:text-sm text-gray-600">
-                       {journeyData.vessel.position.latitude.toFixed(3)}°, {journeyData.vessel.position.longitude.toFixed(3)}°
-                     </p>
-                   </div>
-                 </div>
+                      {journeyData.routes.prediction && (
+                        <div className="ml-7 mb-4 p-3 bg-teal-50 rounded-lg border-l-4 border-teal-500">
+                          <p className="text-xs md:text-sm font-medium text-teal-800">Remaining Journey</p>
+                          <div className="flex justify-between text-xs md:text-sm text-teal-700 mt-1">
+                            <span>{formatDistance(journeyData.routes.prediction.properties?.distance)}</span>
+                            <span>{formatDuration(journeyData.routes.prediction.properties?.duration)}</span>
+                          </div>
+                        </div>
+                      )}
 
-                 {journeyData.routes.prediction && (
-                   <div className="ml-7 mb-4 p-3 bg-teal-50 rounded-lg border-l-4 border-teal-500">
-                     <p className="text-xs md:text-sm font-medium text-teal-800">Remaining Journey</p>
-                     <div className="flex justify-between text-xs md:text-sm text-teal-700 mt-1">
-                       <span>{formatDistance(journeyData.routes.prediction.properties?.distance)}</span>
-                       <span>{formatDuration(journeyData.routes.prediction.properties?.duration)}</span>
-                     </div>
-                   </div>
-                 )}
+                      <div className="flex items-center">
+                        <div className="w-4 h-4 bg-red-500 rounded-full mr-3 relative z-10"></div>
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm md:text-base">{journeyData.ports.discharge.name}</p>
+                          <p className="text-xs md:text-sm text-gray-600">Port of Discharge</p>
+                          {journeyData.tracking.arrivalTime && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              ETA: {new Date(journeyData.tracking.arrivalTime.value).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
 
-                 <div className="flex items-center">
-                   <div className="w-4 h-4 bg-red-500 rounded-full mr-3 relative z-10"></div>
-                   <div>
-                     <p className="font-medium text-gray-900 text-sm md:text-base">{journeyData.ports.discharge.name}</p>
-                     <p className="text-xs md:text-sm text-gray-600">Port of Discharge</p>
-                     {journeyData.tracking.arrivalTime && (
-                       <p className="text-xs text-gray-500 mt-1">
-                         ETA: {new Date(journeyData.tracking.arrivalTime.value).toLocaleDateString()}
-                       </p>
-                     )}
-                   </div>
-                 </div>
+                      <div className="absolute left-2 top-4 bottom-4 w-0.5 bg-gray-300"></div>
+                    </div>
+                  </div>
+                )}
 
-                 <div className="absolute left-2 top-4 bottom-4 w-0.5 bg-gray-300"></div>
-               </div>
-             </div>
-           )}
+                {/* Latest Update */}
+                {journeyData?.tracking.lastMovement && (
+                  <div>
+                    <h3 className="text-base md:text-lg font-bold text-gray-900 mb-2">Latest Update</h3>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-xs md:text-sm text-gray-700">{journeyData.tracking.lastMovement}</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {new Date(journeyData.vessel.position.actualSnapTime).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-           {/* Latest Update */}
-           {journeyData?.tracking.lastMovement && (
-             <div>
-               <h3 className="text-base md:text-lg font-bold text-gray-900 mb-2">Latest Update</h3>
-               <div className="p-3 bg-gray-50 rounded-lg">
-                 <p className="text-xs md:text-sm text-gray-700">{journeyData.tracking.lastMovement}</p>
-                 <p className="text-xs text-gray-500 mt-1">
-                   {new Date(journeyData.vessel.position.actualSnapTime).toLocaleString()}
-                 </p>
-               </div>
-             </div>
-           )}
+                {/* Map Legend */}
+                <div>
+                  <h3 className="text-base md:text-lg font-bold text-gray-900 mb-3">Map Legend</h3>
+                  <div className="space-y-2 text-xs md:text-sm">
+                    <div className="flex items-center">
+                      <div className="w-4 h-1 bg-emerald-500 mr-3"></div>
+                      <span>Completed route</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-4 h-1 bg-teal-600 mr-3"></div>
+                      <span>Predicted route</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-3 h-3 bg-emerald-500 rounded-full mr-3"></div>
+                      <span>Origin port</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-3 h-3 bg-teal-600 rounded-full mr-3 animate-pulse"></div>
+                      <span>Current position</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-3 h-3 bg-red-500 rounded-full mr-3"></div>
+                      <span>Destination port</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-           {/* Map Legend */}
-           <div>
-             <h3 className="text-base md:text-lg font-bold text-gray-900 mb-3">Map Legend</h3>
-             <div className="space-y-2 text-xs md:text-sm">
-               <div className="flex items-center">
-                 <div className="w-4 h-1 bg-emerald-500 mr-3"></div>
-                 <span>Completed route (searoute-ts)</span>
-               </div>
-               <div className="flex items-center">
-                 <div className="w-4 h-1 bg-teal-600 mr-3"></div>
-                 <span>Predicted route (searoute-ts)</span>
-               </div>
-               <div className="flex items-center">
-                 <div className="w-3 h-3 bg-emerald-500 rounded-full mr-3"></div>
-                 <span>Origin port</span>
-               </div>
-               <div className="flex items-center">
-                 <div className="w-3 h-3 bg-teal-600 rounded-full mr-3 animate-pulse"></div>
-                 <span>Current position</span>
-               </div>
-               <div className="flex items-center">
-                 <div className="w-3 h-3 bg-red-500 rounded-full mr-3"></div>
-                 <span>Destination port</span>
-               </div>
-             </div>
-           </div>
-         </div>
-       </div>
-
-       {/* Right Panel - Map - Takes remaining space */}
-       <div className="flex-1 bg-white rounded-xl shadow-lg overflow-hidden min-h-[500px] xl:min-h-0">
-   {!mapLoaded && (
-     <div className="h-full flex items-center justify-center min-h-[500px]">
-       <div className="text-center">
-         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-         <p className="text-gray-600">Loading map...</p>
-       </div>
-     </div>
-   )}
-          <div 
-     id="journey-map" 
-     className="w-full h-full min-h-[500px]"
-     style={{ display: mapLoaded ? 'block' : 'none' }}
-   ></div>
- </div>
-</div>
-   )}
- </div>
-
-</div>
-);
+            {/* Right Panel - Map */}
+            <div className="flex-1 bg-white rounded-xl shadow-lg overflow-hidden min-h-[500px] xl:min-h-0">
+              {!mapLoaded && (
+                <div className="h-full flex items-center justify-center min-h-[500px]">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading map...</p>
+                  </div>
+                </div>
+              )}
+              <div 
+                id="journey-map" 
+                className="w-full h-full min-h-[500px]"
+                style={{ display: mapLoaded ? 'block' : 'none' }}
+              ></div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default CompleteVisiwiseTracker;
