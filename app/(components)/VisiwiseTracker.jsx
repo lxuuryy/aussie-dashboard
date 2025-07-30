@@ -922,17 +922,12 @@ const CompleteVisiwiseTracker = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-emerald-50 to-teal-50">
+    <div className="min-h-screen w-full bg-gradient-to-br from-emerald-50 to-teal-50 mt-[100px]">
       {/* Header */}
       <div className="bg-white shadow-sm border-b -mx-4 md:-mx-6 -mt-4 md:-mt-6 mb-4 md:mb-6">
         <div className="px-4 md:px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">🚢</span>
-              </div>
-              <h1 className="text-xl font-semibold text-gray-900">Maritime Journey Tracker</h1>
-            </div>
+            
             {journeyData && (
               <button
                 onClick={() => {

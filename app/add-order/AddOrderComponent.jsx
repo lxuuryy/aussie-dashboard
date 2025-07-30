@@ -113,6 +113,7 @@ const AddOrderForm = () => {
   const [orderForm, setOrderForm] = useState({
     // Customer information
     poNumber: '',
+      salesContract: '', 
     customerInfo: {
       companyName: '',
       contactPerson: '',
@@ -982,8 +983,8 @@ const AddOrderForm = () => {
       product.itemCode && product.productName && product.unitPrice && product.quantity
     );
 
-    if (!userEmail || !hasValidProducts || !orderForm.customerInfo.companyName || !orderForm.poNumber) {
-      alert('Please fill in all required fields including PO Number for all products and your email');
+if (!userEmail || !hasValidProducts || !orderForm.customerInfo.companyName || !orderForm.poNumber || !orderForm.salesContract) {
+  alert('Please fill in all required fields including PO Number, Sales Contract Number for all products and your email'); // ← UPDATE MESSAGE
       return;
     }
 
@@ -1001,7 +1002,8 @@ const AddOrderForm = () => {
       
       const totals = calculateTotals();
       const poNumber = orderForm.poNumber;
-      const salesContractNumber = generateSalesContractNumber();
+          const salesContractNumber = orderForm.salesContract; // ← ADD THIS LINE
+
       const currentDate = new Date();
       const signatureDateTime = new Date(signatureForm.signatureDate);
       
@@ -1256,29 +1258,43 @@ const AddOrderForm = () => {
 
            {/* PO Number - Required First */}
            <Card>
-             <CardHeader>
-               <CardTitle className="flex items-center gap-2">
-                 <FileText className="w-5 h-5" />
-                 Purchase Order Number
-               </CardTitle>
-               <CardDescription>
-                 Enter your PO number to begin the order creation process
-               </CardDescription>
-             </CardHeader>
-             <CardContent>
-               <div className="max-w-md">
-                 <Label htmlFor="poNumber">PO Number *</Label>
-                 <Input
-                   id="poNumber"
-                   type="text"
-                   value={orderForm.poNumber}
-                   onChange={(e) => handleInputChange('order', 'poNumber', e.target.value)}
-                   placeholder="e.g. PO-2024-001"
-                   className="mt-1"
-                 />
-               </div>
-             </CardContent>
-           </Card>
+  <CardHeader>
+    <CardTitle className="flex items-center gap-2">
+      <FileText className="w-5 h-5" />
+      Order Numbers 
+    </CardTitle>
+    <CardDescription>
+      Enter your PO number and Sales Contract number
+    </CardDescription>
+  </CardHeader>
+  <CardContent>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* ← CHANGE TO GRID */}
+      <div>
+        <Label htmlFor="poNumber">PO Number *</Label>
+        <Input
+          id="poNumber"
+          type="text"
+          value={orderForm.poNumber}
+          onChange={(e) => handleInputChange('order', 'poNumber', e.target.value)}
+          placeholder="e.g. PO-2024-001"
+          className="mt-1"
+        />
+      </div>
+      {/* ← ADD THIS NEW FIELD */}
+      <div>
+        <Label htmlFor="salesContract">Sales Contract Number *</Label>
+        <Input
+          id="salesContract"
+          type="text"
+          value={orderForm.salesContract}
+          onChange={(e) => handleInputChange('order', 'salesContract', e.target.value)}
+          placeholder="e.g. SC-2024-001"
+          className="mt-1"
+        />
+      </div>
+    </div>
+  </CardContent>
+</Card>
 
            {/* Product Information */}
            <Card>
@@ -2035,6 +2051,7 @@ const AddOrderForm = () => {
                      <SelectContent>
                        <SelectItem value="30 Days from delivery to yard">30 Days from delivery to yard</SelectItem>
                        <SelectItem value="14 Days from delivery">14 Days from delivery</SelectItem>
+                       <SelectItem value="45 days EOM after delivery">45 days EOM after delivery</SelectItem>
                        <SelectItem value="Cash on delivery">Cash on delivery</SelectItem>
                        <SelectItem value="Payment in advance">Payment in advance</SelectItem>
                        <SelectItem value="Letter of credit">Letter of credit</SelectItem>
@@ -2053,6 +2070,7 @@ const AddOrderForm = () => {
                      </SelectTrigger>
                      <SelectContent>
                        <SelectItem value="Delivery Duty paid - unloading by purchaser">Delivery Duty paid - unloading by purchaser</SelectItem>
+                       <SelectItem value="Free Into Store - unloading by purchaser">Free Into Store - unloading by purchaser</SelectItem>
                        <SelectItem value="Ex-works">Ex-works</SelectItem>
                        <SelectItem value="Free on board">Free on board</SelectItem>
                        <SelectItem value="Cost and freight">Cost and freight</SelectItem>
@@ -2156,6 +2174,7 @@ const AddOrderForm = () => {
                onClick={() => setStep(3)}
                disabled={
                  !orderForm.poNumber ||
+                   !orderForm.salesContract || // ←
                  !products.every(p => p.itemCode && p.productName && p.unitPrice && p.quantity) || 
                  !orderForm.customerInfo.companyName
                }
@@ -2456,6 +2475,7 @@ const AddOrderForm = () => {
                  loading || 
                  !userEmail || 
                  !orderForm.poNumber ||
+                 !orderForm.salesContract || // ← ADD THIS LINE
                  !products.every(p => p.itemCode && p.productName && p.unitPrice && p.quantity) || 
                  !orderForm.customerInfo.companyName ||
                  (salesContractFile && (!signatureForm.signerName || !signatureForm.signatureDate))
@@ -2469,7 +2489,7 @@ const AddOrderForm = () => {
                  </>
                ) : (
                  <>
-                   <Save className="w-4 w-4" />
+                   <Save className="w-4 " />
                    Create Order
                  </>
                )}
