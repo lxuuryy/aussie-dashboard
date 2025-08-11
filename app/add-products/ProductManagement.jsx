@@ -172,27 +172,7 @@ const ProductManagement = () => {
   };
 
   // Check if item code already exists
-  const checkCodeExists = async (itemCode) => {
-    if (!itemCode.trim()) return;
-    
-    try {
-      setIsCheckingCode(true);
-      
-      const productsRef = collection(db, 'products');
-      const q = query(productsRef, where('itemCode', '==', itemCode.toUpperCase()));
-      const querySnapshot = await getDocs(q);
-      
-      const existingProduct = querySnapshot.docs.find(doc => 
-        editingProduct ? doc.id !== editingProduct.id : true
-      );
-      
-      setCodeExists(!!existingProduct);
-    } catch (error) {
-      console.error('Error checking item code:', error);
-    } finally {
-      setIsCheckingCode(false);
-    }
-  };
+  
 
   // Handle form field changes
   const handleInputChange = (field, value) => {
@@ -668,7 +648,7 @@ const ProductManagement = () => {
                                   setCodeExists(false);
                                 }
                               }}
-                              onBlur={() => checkCodeExists(formData.itemCode)}
+                              
                               className={errors.itemCode || codeExists ? 'border-red-500' : ''}
                               placeholder="e.g. FBSB321330"
                             />

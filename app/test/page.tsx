@@ -3,6 +3,8 @@
 import VisiwiseTracker from "../(components)/VisiwiseTracker" 
 import PDFGenerator from "@/app/(components)/PDFGenerator"
 import SMSSender from "@/app/(components)/SMSSender"
+import MyOrdersPage from "@/app/(components)/MyOrdersPage"
+import VisiwiseTestTracker from "../(components)/VisiwiseTestTracker"
 
 
 
@@ -13,7 +15,7 @@ const page = (props: Props) => {
   return (
     <div>
       
-     <SMSSender />
+    <VisiwiseTestTracker />
      
     </div>
   )

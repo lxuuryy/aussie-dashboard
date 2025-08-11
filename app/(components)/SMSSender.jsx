@@ -6,6 +6,7 @@ export default function SMSButton() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [senderId, setSenderId] = useState('');
 
   const sendSMS = async () => {
     if (!phoneNumber || !message) {
@@ -24,6 +25,7 @@ export default function SMSButton() {
         body: JSON.stringify({
           phoneNumber: phoneNumber,
           message: message,
+          senderId: senderId || undefined, // Only send if provided
         }),
       });
 
@@ -33,6 +35,7 @@ export default function SMSButton() {
         alert('SMS sent successfully!');
         setMessage('');
         setPhoneNumber('');
+        setSenderId('');
       } else {
         alert('Failed to send SMS: ' + data.error);
       }
@@ -57,7 +60,24 @@ export default function SMSButton() {
           className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
-      
+
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Sender ID (Optional)
+        </label>
+        <input
+          type="text"
+          value={senderId}
+          onChange={(e) => setSenderId(e.target.value)}
+          placeholder="MyCompany"
+          maxLength={11}
+          className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <div className="text-xs text-gray-500 mt-1">
+          3-11 characters, letters and numbers only. Leave blank to use default.
+        </div>
+      </div>
+            
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Message
@@ -78,8 +98,8 @@ export default function SMSButton() {
         onClick={sendSMS}
         disabled={loading}
         className={`w-full py-3 px-4 rounded-md text-white font-medium transition-colors ${
-          loading 
-            ? 'bg-gray-400 cursor-not-allowed' 
+          loading
+            ? 'bg-gray-400 cursor-not-allowed'
             : 'bg-blue-500 hover:bg-blue-600 active:bg-blue-700'
         }`}
       >
@@ -88,5 +108,3 @@ export default function SMSButton() {
     </div>
   );
 }
-
-// 5. Notification Button Component: app/components/NotificationButton.jsx

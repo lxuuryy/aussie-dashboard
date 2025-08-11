@@ -38,13 +38,14 @@ import {
   updateDoc, 
   doc, 
   serverTimestamp,
-  deleteDoc 
+  deleteDoc,
+  getDoc
 } from 'firebase/firestore';
 
 const OrderTrackingDashboard = () => {
   const router = useRouter();
   const params = useParams();
-  const poNumber = params?.poNumber;
+  const orderId = params?.poNumber; // This is the document ID
 
   const [order, setOrder] = useState(null);
   const [trackingHistory, setTrackingHistory] = useState([]);
@@ -60,55 +61,50 @@ const OrderTrackingDashboard = () => {
     status: 'pending',
     location: '',
     note: '',
-   
   });
 
-  const statusOptions = [
-    { value: 'pending', label: 'Pending', color: 'yellow' },
-    { value: 'confirmed', label: 'Confirmed', color: 'blue' },
-    { value: 'processing', label: 'Processing', color: 'purple' },
-    { value: 'shipped', label: 'Shipped', color: 'orange' },
-    { value: 'delivered', label: 'Delivered', color: 'green' },
-    { value: 'completed', label: 'Completed', color: 'teal' },
-    { value: 'cancelled', label: 'Cancelled', color: 'red' }
-  ];
+ const statusOptions = [
+  { value: 'pending', label: 'Pending', color: 'yellow' },
+  { value: 'confirmed', label: 'Confirmed', color: 'blue' },
+  { value: 'processing', label: 'Processing', color: 'purple' },
+  { value: 'shipped', label: 'Shipped', color: 'orange' },
+  { value: 'at-port', label: 'At Port - Awaiting Delivery', color: 'indigo' }, // NEW STATUS
+  { value: 'delivered', label: 'Delivered', color: 'green' },
+  { value: 'completed', label: 'Completed', color: 'teal' },
+  { value: 'cancelled', label: 'Cancelled', color: 'red' }
+];
 
   useEffect(() => {
-    if (poNumber) {
+    if (orderId) {
       fetchOrderAndTracking();
     }
-  }, [poNumber]);
+  }, [orderId]);
 
   const fetchOrderAndTracking = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch the order details
-      const ordersQuery = query(
-        collection(db, 'orders'),
-        where('poNumber', '==', poNumber)
-      );
+      // Fetch the order details using document ID
+      const orderDocRef = doc(db, 'orders', orderId);
+      const orderSnapshot = await getDoc(orderDocRef);
       
-      const ordersSnapshot = await getDocs(ordersQuery);
-      
-      if (ordersSnapshot.empty) {
+      if (!orderSnapshot.exists()) {
         setError('Order not found');
         return;
       }
 
-      const orderDoc = ordersSnapshot.docs[0];
       const orderData = {
-        id: orderDoc.id,
-        ...orderDoc.data()
+        id: orderSnapshot.id,
+        ...orderSnapshot.data()
       };
 
       setOrder(orderData);
 
-      // Fetch tracking history
+      // Fetch tracking history using poNumber from the order
       const trackingQuery = query(
         collection(db, 'orderTracker'),
-        where('poNumber', '==', poNumber),
+        where('poNumber', '==', orderData.poNumber),
         orderBy('timestamp', 'desc')
       );
 
@@ -142,7 +138,8 @@ const OrderTrackingDashboard = () => {
 
     try {
       const trackingData = {
-        poNumber,
+        orderId, // Document ID for reference
+        poNumber: order?.poNumber, // PO Number from order
         status: formData.status,
         location: formData.location,
         note: formData.note,
@@ -162,15 +159,13 @@ const OrderTrackingDashboard = () => {
         setSuccess('Tracking update added successfully!');
       }
 
-      // Update order status and estimated delivery if provided
+      // Update order status
       const orderUpdateData = {
-        orderStatus: formData.status,
+        status: formData.status, // Update the main status field
         lastUpdated: serverTimestamp()
       };
 
-      
-
-      await updateDoc(doc(db, 'orders', order.id), orderUpdateData);
+      await updateDoc(doc(db, 'orders', orderId), orderUpdateData);
 
       // Reset form and refresh data
       resetForm();
@@ -190,7 +185,6 @@ const OrderTrackingDashboard = () => {
       status: tracking.status,
       location: tracking.location,
       note: tracking.note || '',
-    
     });
     setShowAddForm(true);
   };
@@ -215,25 +209,24 @@ const OrderTrackingDashboard = () => {
       status: 'pending',
       location: '',
       note: '',
-    
     });
     setShowAddForm(false);
     setEditingId(null);
   };
 
   const getStatusIcon = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'pending': return <Clock className="w-4 h-4 text-yellow-600" />;
-      case 'confirmed': return <CheckCircle className="w-4 h-4 text-blue-600" />;
-      case 'processing': return <Factory className="w-4 h-4 text-purple-600" />;
-      case 'shipped': return <Ship className="w-4 h-4 text-orange-600" />;
-      case 'delivered': return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'completed': return <CheckCircle className="w-4 h-4 text-teal-600" />;
-      case 'cancelled': return <AlertCircle className="w-4 h-4 text-red-600" />;
-      default: return <Info className="w-4 h-4 text-gray-400" />;
-    }
-  };
-
+  switch (status?.toLowerCase()) {
+    case 'pending': return <Clock className="w-4 h-4 text-yellow-600" />;
+    case 'confirmed': return <CheckCircle className="w-4 h-4 text-blue-600" />;
+    case 'processing': return <Factory className="w-4 h-4 text-purple-600" />;
+    case 'shipped': return <Ship className="w-4 h-4 text-orange-600" />;
+    case 'at-port': return <MapPin className="w-4 h-4 text-indigo-600" />; // NEW ICON
+    case 'delivered': return <CheckCircle className="w-4 h-4 text-green-600" />;
+    case 'completed': return <CheckCircle className="w-4 h-4 text-teal-600" />;
+    case 'cancelled': return <AlertCircle className="w-4 h-4 text-red-600" />;
+    default: return <Info className="w-4 h-4 text-gray-400" />;
+  }
+};
   const getStatusColor = (status) => {
     const option = statusOptions.find(opt => opt.value === status?.toLowerCase());
     return option ? `bg-${option.color}-100 text-${option.color}-800 border-${option.color}-200` : 'bg-gray-100 text-gray-800 border-gray-200';
@@ -258,7 +251,7 @@ const OrderTrackingDashboard = () => {
     }).format(amount || 0);
   };
 
-  if ( loading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg p-8 shadow-sm border">
@@ -304,13 +297,13 @@ const OrderTrackingDashboard = () => {
                 Back to Dashboard
               </button>
               <h1 className="text-2xl font-bold text-gray-900">
-                Order Tracking Dashboard - {poNumber}
+                Order Tracking Dashboard - {order?.poNumber}
               </h1>
               <p className="text-gray-600">Manage and update order tracking information</p>
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => router.push(`/tracking/${poNumber}`)}
+                onClick={() => router.push(`/tracking/${order?.poNumber}`)}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
                 <Eye className="w-4 h-4" />
@@ -360,7 +353,7 @@ const OrderTrackingDashboard = () => {
                   <Building className="w-4 h-4 text-gray-500" />
                   <div>
                     <p className="text-sm text-gray-600">Company</p>
-                    <p className="font-medium">{order?.customerInfo?.companyName}</p>
+                    <p className="font-medium">{order?.customerInfo?.companyName || order?.companyData?.companyName}</p>
                   </div>
                 </div>
 
@@ -369,7 +362,7 @@ const OrderTrackingDashboard = () => {
                   <div>
                     <p className="text-sm text-gray-600">Product</p>
                     <p className="font-medium">
-                      {order?.items?.[0]?.barType} × {order?.items?.[0]?.length}m
+                      {order?.items?.[0]?.barType} × {order?.items?.[0]?.dimensions?.length}m
                     </p>
                   </div>
                 </div>
@@ -379,7 +372,7 @@ const OrderTrackingDashboard = () => {
                   <div>
                     <p className="text-sm text-gray-600">Quantity</p>
                     <p className="font-medium">
-                      {order?.items?.[0]?.totalWeight || order?.items?.[0]?.quantity} tonnes
+                      {order?.items?.[0]?.totalWeight || order?.items?.[0]?.quantity} {order?.items?.[0]?.totalWeight ? 'tonnes' : 'units'}
                     </p>
                   </div>
                 </div>
@@ -402,12 +395,35 @@ const OrderTrackingDashboard = () => {
                   </div>
                 </div>
 
+                {order?.estimatedDelivery && (
+                  <div className="flex items-center gap-3">
+                    <Truck className="w-4 h-4 text-gray-500" />
+                    <div>
+                      <p className="text-sm text-gray-600">Estimated Delivery</p>
+                      <p className="font-medium">{formatDate(order?.estimatedDelivery)}</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-3">
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(order?.orderStatus)}`}>
-                    {getStatusIcon(order?.orderStatus)}
-                    <span className="ml-2 capitalize">{order?.orderStatus || 'Pending'}</span>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(order?.status)}`}>
+                    {getStatusIcon(order?.status)}
+                    <span className="ml-2 capitalize">{order?.status || 'Pending'}</span>
                   </span>
                 </div>
+
+                {/* Shipping Container Info */}
+                {order?.shippingContainers && order?.shippingContainers.length > 0 && (
+                  <div className="border-t pt-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Shipping Details</h4>
+                    {order.shippingContainers.map((container, index) => (
+                      <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                        <p className="text-sm"><strong>Container:</strong> {container.containerNumber}</p>
+                        <p className="text-sm"><strong>Shipping Line:</strong> {container.shippingLine}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -477,8 +493,6 @@ const OrderTrackingDashboard = () => {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
-
-                    
 
                     <div className="flex gap-3">
                       <button
